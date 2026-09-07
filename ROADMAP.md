@@ -58,6 +58,12 @@ fields are required, what a good placeholder value is) alongside this, so a
 new instance author doesn't have to reverse-engineer `applyBrand.js` to know
 what's usable?
 
+**Confirmed independently:** hit in practice while standing up a new `tufts`
+instance — `applyBrand.js` reads `brand.colors.*`/`fontFamily`/`fontUrl` with
+no fallback, so any field left un-overridden in the new instance's `brand`
+object silently inherits Purdue's actual values from `brand.js`, exactly as
+described above.
+
 ---
 
 ## R2 — Rethink "camps" as one specific outreach model
@@ -447,3 +453,58 @@ Space for smaller items that don't yet warrant their own section:
   admin manually resetting it from the Supabase dashboard. Fine for a small
   deployment where the admin is reachable; a real gap once there are more
   users than one admin can reasonably hand-hold.
+
+---
+
+## R11 — Path-based instance routing (`<domain>.com/app1` vs `/app2`)
+
+**Status:** idea
+
+**Problem:** `src/config/instance.js`'s `HOST_INSTANCE` map only resolves an
+instance from `window.location.hostname` — it has no concept of routing
+different instances off of *paths* on the same hostname (e.g.
+`coderobots.example.com/public` vs `/students` vs `/class` all resolving to
+different instance configs). Today, serving multiple instances off one
+Vercel deployment requires a distinct subdomain per instance (plus a DNS
+record and a `HOST_INSTANCE` entry for each) — there's no lighter-weight
+option for someone who wants multiple instances under one domain without
+provisioning subdomains.
+
+**Why it matters:** subdomains require DNS control and a record per
+instance, which is more setup than some deployers may want for what's
+conceptually just "a few variants of the same program" (e.g. a public trial,
+a general student instance, and one scoped to a specific class). A
+path-based scheme would let all of those live under one domain with a
+single DNS record.
+
+**Affected files:**
+- `src/config/instance.js` — `HOST_INSTANCE` resolution would need to also
+  inspect `window.location.pathname`, not just `hostname`
+- `vercel.json` — the catch-all SPA rewrite
+  (`"source": "/((?!.*\\.).*)", "destination": "/"`) already sends every
+  non-file path to the same `index.html`, so the split would need to happen
+  entirely client-side (no server-side path routing exists today) — this
+  rule likely doesn't need to change, but is the reason the split *can* be
+  client-side rather than requiring separate server routing per path
+- `App.jsx` — the existing app routes (`/`, `/data`, `/usage`, `/view-data`)
+  would need to coexist with an instance-selecting path prefix (e.g.
+  `/students/data` should still reach the `students` instance's admin data
+  view, not collide with a literal `/data` route) — likely means introducing
+  a path prefix/basename that both the instance selector and React Router
+  agree on
+
+**Possible approach:** treat the first path segment as an optional instance
+selector, analogous to today's hostname map, e.g. a `PATH_INSTANCE` lookup
+keyed by first segment, falling back to `HOST_INSTANCE` then `VITE_INSTANCE`
+if no segment matches a known instance. Would need a decision on whether the
+prefix is stripped before React Router sees the rest of the path (so
+`/students/data` behaves like today's `/data` route, just scoped) — likely
+via a React Router `basename` computed from the matched prefix.
+
+**Open questions:** should path-based and host-based routing both be
+supported simultaneously (a path prefix on a given host), or is this meant
+as an alternative to subdomains for deployers without DNS control? Does the
+matched path prefix need to persist through client-side navigation and
+page refreshes (i.e. does it need to be more than just the initial-load
+resolution `HOST_INSTANCE` currently does)? How should an unrecognized
+first path segment be told apart from a legitimate app route/deep link?
