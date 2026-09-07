@@ -24,6 +24,9 @@ dist-ssr
 *.sw?
 camp_users.csv
 
+# Personal working notes, not for the shared repo
+LOCALNOTES.md
+
 # Cache
 __pycache__/
 modal_functions/__pycache__/
