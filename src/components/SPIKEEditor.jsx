@@ -72,6 +72,8 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   const [flashMessage, setFlashMessage] = useState('');
   // LEGO Education BLE: per-kind device lists for the ControlPanel icon row.
   const [legoConnectionState, setLegoConnectionState] = useState(legoGetConnectionState);
+  // SPIKE Prime: which program slot (0-19) "Save to Slot" writes to.
+  const [selectedSlot, setSelectedSlot] = useState(0);
 
   const {
     codeRecords,
@@ -818,6 +820,20 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     setConnectedBoard('esp32');
   };
 
+  const connectSpike = async (board) => {
+    setStatusBanner({
+      type: 'info',
+      message: t('waitingSpikeSelection')
+    });
+    await board.connect(replContainerRef.current, true, { boardType: 'spike' });
+    await board.interrupt(150);
+    if (activePlatform?.stopCode) {
+      await board.paste(activePlatform.stopCode, { hidden: true });
+    }
+    setConnectedBoard('spike');
+    setMode('repl');
+  };
+
   const handleConnect = async (targetBoard) => {
     const board = boardRef.current;
     if (!board || isConnecting || connected) return;
@@ -861,6 +877,8 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
             message: t('errInstallDriverDevice').replace('{label}', error?.label || t('driver')),
           });
         }
+      } else if (targetBoard === 'spike') {
+        await connectSpike(board);
       } else {
         await connectPico(board);
       }
@@ -1108,6 +1126,96 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     }
   };
 
+  // SPIKE Prime: leave Program Slot mode and go back to an interactive REPL.
+  const handleEnterReplMode = async () => {
+    const board = boardRef.current;
+    if (!board || !connected) return;
+
+    await logInteractionSafe('switch_to_repl_mode');
+    await board.interrupt(150);
+    setMode('repl');
+    board.terminal?.focus();
+  };
+
+  // SPIKE Prime: reset the hub into whichever program slot it's set to run,
+  // leaving the REPL (so Run/Stop no longer apply until back in REPL mode).
+  const handleEnterProgramSlotMode = async () => {
+    const board = boardRef.current;
+    if (!board || !connected) return;
+
+    await logInteractionSafe('switch_to_program_slot_mode');
+    setIsRunning(false);
+    await board.reset();
+    setMode('program-slot');
+    board.terminal?.focus();
+  };
+
+  // SPIKE Prime: write the current code as /flash/program/<slot>/program.py so
+  // it runs autonomously on the hub, untethered from the browser.
+  const handleSaveToSlot = async () => {
+    const board = boardRef.current;
+    if (!board || !connected) {
+      alert(t('cannotSaveToSlotDevice'));
+      return;
+    }
+
+    const codeToSave = editorRef.current?.getCode() || currentCodeContent;
+
+    await createSnapshot(`save_to_slot_${selectedSlot}`);
+    await logInteractionSafe(`save_to_slot_${selectedSlot}`);
+
+    const slotStr = String(selectedSlot).padStart(2, '0');
+    const escapedCode = JSON.stringify(codeToSave);
+
+    const script = `
+import os
+import sys
+
+slot_dir_name = "${slotStr}"
+code_to_write = ${escapedCode}
+program_dir = "program"
+target_file = "program.py"
+
+# Ensure we are in the root directory
+if (not os.getcwd() == '/flash'):
+    os.chdir('/flash')
+
+# Check for 'program' directory, create if it doesn't exist
+if program_dir not in os.listdir():
+    os.mkdir(program_dir)
+os.chdir(program_dir)
+
+# Check for the specific slot directory, create if it doesn't exist
+if slot_dir_name not in os.listdir():
+    os.mkdir(slot_dir_name)
+os.chdir(slot_dir_name)
+
+# Clean up old program files to ensure our .py file runs
+for filename in ['program.mpy', 'program.py']:
+    try:
+        os.remove(filename)
+    except OSError:
+        pass # File didn't exist, which is fine
+
+# Write the new program file in chunks of chunk_size characters
+with open(target_file, "w") as f:
+    f.write(code_to_write)
+
+# Try to return to the root directory
+os.chdir('/flash')
+`;
+
+    try {
+      await board.paste(script, { hidden: false });
+      await board.reset();
+      setMode('program-slot');
+      board.terminal?.focus();
+    } catch (error) {
+      console.error('Failed to save to slot:', error);
+      alert(`${t('failedToSaveToSlot')}${error.message}`);
+    }
+  };
+
   const handleClearMain = async () => {
     const board = boardRef.current;
     if (!board || !connected || connectedBoard !== 'esp32') {
@@ -1244,6 +1352,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
               onConnectPico={() => handleConnect('pico')}
               onConnectEsp32={() => handleConnect('esp32')}
               onConnectEsp32Arduino={handleArduinoConnect}
+              onConnectSpike={() => handleConnect('spike')}
               onDisconnect={handleDisconnect}
               onRun={handleRun}
               onCtrlC={handleCtrlC}
@@ -1253,6 +1362,12 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
               onDownload={handleDownload}
               onClearDownload={handleClearDownload}
               onClearMain={handleClearMain}
+              mode={mode}
+              selectedSlot={selectedSlot}
+              onSlotChange={setSelectedSlot}
+              onEnterReplMode={handleEnterReplMode}
+              onEnterProgramSlotMode={handleEnterProgramSlotMode}
+              onSaveToSlot={handleSaveToSlot}
               legoConnectionState={legoConnectionState}
               onLegoPickerOpen={handleLegoPickerOpen}
               onLegoConnectDevice={handleLegoDeviceConnect}

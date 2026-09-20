@@ -188,6 +188,7 @@ const ControlPanel = ({
   onConnectPico,
   onConnectEsp32,
   onConnectEsp32Arduino,
+  onConnectSpike,
   onDisconnect,
   onRun,
   onCtrlC,
@@ -197,6 +198,12 @@ const ControlPanel = ({
   onDownload,
   onClearDownload,
   onClearMain,
+  mode = 'disconnected',
+  selectedSlot = 0,
+  onSlotChange,
+  onEnterReplMode,
+  onEnterProgramSlotMode,
+  onSaveToSlot,
   legoConnectionState = null,
   onLegoPickerOpen,
   onLegoConnectDevice,
@@ -206,6 +213,7 @@ const ControlPanel = ({
   const { t } = useLanguage();
   const isLego = platformConnectionType === 'lego-ble';
   const isArduino = platformConnectionType === 'esp32-arduino';
+  const isSpike = platformConnectionType === 'spike';
   const [legoPickerOpen, setLegoPickerOpen] = useState(false);
 
   return (
@@ -283,6 +291,15 @@ const ControlPanel = ({
                 {isConnecting ? t('legoConnecting') : t('connectEsp32')}
               </button>
             )}
+            {isSpike && (
+              <button
+                onClick={onConnectSpike}
+                className="button connect-button"
+                disabled={isConnecting}
+              >
+                {isConnecting ? t('legoConnecting') : t('connectSpike')}
+              </button>
+            )}
           </>
         )}
         <button onClick={onClear} className="button clear-console-button" disabled={isConnecting}>
@@ -290,7 +307,7 @@ const ControlPanel = ({
         </button>
       </div>
 
-      {connected && (
+      {connected && (!isSpike || mode !== 'program-slot') && (
         <div className="button-group">
           <button onClick={onRun} className="button run-button">
             {isArduino ? t('esp32CompileAndUpload') : t('runProgram')}
@@ -334,6 +351,34 @@ const ControlPanel = ({
               {t('resetDevice')}
             </button>
           )}
+          {isSpike && (
+            <>
+              <button onClick={onEnterProgramSlotMode} className="button clear-console-button">
+                {t('enterProgramSlotMode')}
+              </button>
+              <select
+                value={selectedSlot}
+                onChange={(e) => onSlotChange(Number(e.target.value))}
+                className="slot-selector"
+                title={t('selectProgramSlot')}
+              >
+                {Array.from({ length: 20 }, (_, i) => (
+                  <option key={i} value={i}>{t('slotOption').replace('{n}', i)}</option>
+                ))}
+              </select>
+              <button onClick={onSaveToSlot} className="button run-button">
+                {t('saveToSlot')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {connected && isSpike && mode === 'program-slot' && (
+        <div className="button-group">
+          <button onClick={onEnterReplMode} className="button connect-button">
+            {t('enterReplMode')}
+          </button>
         </div>
       )}
 
