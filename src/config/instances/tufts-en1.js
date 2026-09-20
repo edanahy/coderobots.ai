@@ -26,7 +26,7 @@ const config = {
   telemetry: true,
 
   // Which registered platforms (src/platforms/index.js) users can pick.
-  platforms: ['lego', 'lilybot', 'microbit', 'cutebot', 'esp32'],
+  platforms: ['spike'],
 
   chat: {
     // 'direct': client-side priming, model picker, chat_with_budget endpoint.
