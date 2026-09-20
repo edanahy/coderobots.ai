@@ -416,6 +416,19 @@ nothing about your production site changes until you actually merge into
 `main` — which is exactly the "experiment on `dev`, promote to `main`"
 setup from the very start of this process.
 
+> **Notes & Troubleshooting**
+> - **Changing `VITE_INSTANCE` later:** Vercel's initial import screen (Step
+>   3 above) saves any `VITE_` var as type **Secret** by default, which is
+>   write-only — you can't edit its value afterward, and the dashboard won't
+>   let you convert a Secret to a **Config**-type variable in place (Config
+>   is the one Vercel actually lets you flag as safe for a public/browser
+>   value like an instance name). If you need to change `VITE_INSTANCE` (or
+>   add a Preview/Development-only override to test a different instance on
+>   `dev` before merging to `main`), you'll need to **delete** the existing
+>   variable in Project Settings → Environment Variables and **re-add** it
+>   as type Config, then trigger a fresh deployment — editing it in place
+>   won't work.
+
 ---
 
 ## 8. Setting Admin Users
