@@ -550,18 +550,116 @@ setup from the very start of this process.
 
 ## 9. Adding a Custom Domain (optional)
 
-1. In your Vercel project, go to **Domains** → **Add Existing** → type in
-   your domain.
-2. Go to your domain registrar's DNS records page (Cloudflare, GoDaddy,
-   etc.) and add the record Vercel shows you:
-   - Type: `A`
-   - Name: `@`
-   - Value: (the IP Vercel gives you)
-   - Proxy status: **off / DNS only** (if using Cloudflare — proxying breaks
-     Vercel's SSL handshake)
-   - TTL: Auto
-3. Wait 1–2 minutes, then refresh the Domains page in Vercel — it should
-   show "Valid Configuration."
+You don't need a custom domain — the default `.vercel.app` URLs from Step 7
+work fine on their own. But once you own one, you can point it (or a
+subdomain of it) at your Vercel project, and — since Vercel treats `main` as
+**Production** and every other branch as **Preview** (see "Understanding
+Vercel's URLs" in Step 7) — you can point a *second* subdomain at a specific
+non-`main` branch. That gives you a stable, nice-looking URL for whatever's
+currently live on either branch, e.g. `yourdomain.com` → Production/`main`
+and `dev.yourdomain.com` → Preview/`dev`.
+
+### 9a. Add the domain in Vercel
+
+1. In your Vercel project: **Settings → Domains** (or the **Domains** tab)
+   → **Add** ("Add Existing" if the UI phrases it that way) → type in the
+   domain or subdomain:
+   - Root/apex domain: `yourdomain.com`
+   - Subdomain: `app.yourdomain.com` (any label — `dev`, `app`, etc.)
+2. Choose which environment it connects to:
+   - Your main/production URL: select **Production**.
+   - A second subdomain tracking a non-`main` branch (e.g. `dev`): select
+     that branch instead — Vercel calls this a Preview/branch domain. Every
+     push to that branch then redeploys and the subdomain updates
+     automatically, same as the `-git-dev-<team>.vercel.app` branch alias
+     from Step 7, just under a nicer name.
+3. Click through — Vercel will show the domain as **"Invalid
+   Configuration."** That's expected: your DNS provider doesn't know about
+   this yet — that's the next step.
+
+### 9b. Point DNS at Vercel (your domain registrar)
+
+Do this wherever you registered/manage the domain — Namecheap, GoDaddy,
+Cloudflare, Google Domains, etc. (steps below are Namecheap's; other
+registrars are structurally similar — "Advanced DNS" may be called "DNS
+Management" or "DNS Records" elsewhere).
+
+1. Log into your registrar → select the domain → **Advanced DNS** (or
+   equivalent) → **Add New Record**.
+2. Use the exact record type/host/value Vercel showed on its Domains page
+   in step 9a — which one depends on what you're pointing:
+   - **Root/apex domain** (`yourdomain.com`): an **A** record, Host `@`,
+     Value the IP address Vercel gives.
+   - **Subdomain** (`app.yourdomain.com` / `dev.yourdomain.com`): a
+     **CNAME** record, Host is just the subdomain label (e.g. `dev` — most
+     registrars, Namecheap included, append the root domain for you, so
+     don't repeat it), Value the target Vercel shows (typically
+     `cname.vercel-dns.com`).
+   - If Vercel *also* shows a **TXT** record for domain verification (a
+     unique string proving you own the domain — this can show up if the
+     domain was ever added to a different Vercel account/project before),
+     add that too: Host as shown, Value the unique string Vercel gives.
+   - TTL: **Automatic** (or the lowest available option) — makes the next
+     step faster.
+3. Save. If you're setting up both a production domain and a dev/Preview
+   subdomain, repeat steps 9a–9b for the second one now.
+4. **Wait for DNS to propagate** — anywhere from a couple of minutes to a
+   few hours depending on the registrar and previous TTL (rarely, up to
+   ~48h). Refresh the Domains page in Vercel periodically; once it detects
+   the DNS change it automatically issues an SSL certificate and flips the
+   status to **"Valid Configuration"** — no separate action needed for the
+   certificate itself.
+
+### 9c. Test it
+
+Once Vercel shows "Valid Configuration" for a domain:
+
+- Visit the production domain — it should load the app and match what's
+  live on `main` (same content as the `-alpha.vercel.app` production alias
+  from Step 7).
+- Visit the dev/Preview subdomain (if set up) — it should load whatever's
+  currently pushed to that branch (`dev`), independent of production.
+- If it doesn't resolve yet, check the DNS record actually saved correctly
+  at the registrar (typos in Host/Value are the most common cause) before
+  assuming it just needs more time — a tool like
+  [dnschecker.org](https://dnschecker.org) shows whether the record has
+  propagated globally yet.
+
+### 9d. Update Supabase redirect URLs (telemetry instances only)
+
+If this instance has `telemetry: true` (real Supabase auth, not the
+anonymous local-storage mode), Supabase's auth allow-list needs to know
+about the new domain(s) — otherwise sign-in/sign-up (and Google OAuth, if
+enabled per Step 4d) will fail or redirect back to the wrong place once
+people start using the new domain instead of a `.vercel.app` URL.
+
+1. In Supabase: **Authentication → URL Configuration**.
+2. **Site URL**: update to your production custom domain, if that's now the
+   primary URL you want auth emails/redirects to reference.
+3. **Redirect URLs** (allow-list, supports wildcards) — add each new domain:
+   - `https://yourdomain.com/**`
+   - `https://dev.yourdomain.com/**`
+   - or cover the domain and every subdomain in one entry:
+     `https://*.yourdomain.com/**`
+
+   Leave the existing `localhost` and `*.vercel.app` entries from Step 4d in
+   place — they're still needed for local dev and for anyone still reaching
+   a deployment by its Vercel-generated URL.
+
+> **Notes & Troubleshooting**
+> - **Stuck on "Invalid Configuration":** almost always a DNS mismatch —
+>   double-check the record type (A vs. CNAME vs. TXT), that Host doesn't
+>   accidentally repeat the full domain (Namecheap already appends it, so
+>   Host should be `dev`, not `dev.yourdomain.com`), and that nothing else
+>   is intercepting the record — a Cloudflare proxy (orange cloud) breaks
+>   Vercel's SSL handshake, so keep it **DNS only** there.
+> - **www vs. apex:** for both `yourdomain.com` and `www.yourdomain.com` to
+>   work, add both as separate domains in Vercel (step 9a) and set one to
+>   redirect to the other from the Domains page.
+> - Skipping 9d is the most common way this "half-works": the app loads
+>   fine at the new domain, but signing in silently fails or bounces to a
+>   blank page, because Supabase's redirect allow-list doesn't recognize the
+>   new URL yet.
 
 ---
 
