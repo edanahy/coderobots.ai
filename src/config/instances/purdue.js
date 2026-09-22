@@ -13,6 +13,12 @@ const config = {
   // no admin routes.
   telemetry: true,
 
+  auth: {
+    // Google sign-in is available but not enabled for this instance yet;
+    // flip to true once Google is configured on this Supabase project.
+    google: false,
+  },
+
   // Which registered platforms (src/platforms/index.js) users can pick.
   platforms: ['lilybot', 'microbit', 'cutebot', 'esp32'],
 

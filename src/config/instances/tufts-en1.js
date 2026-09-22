@@ -25,6 +25,21 @@ const config = {
   // no admin routes.
   telemetry: true,
 
+  auth: {
+    // Shows "Continue with Google" as the primary sign-in action in
+    // AuthModal, with email/password moved behind a toggle. Requires the
+    // Google provider to be enabled on this instance's Supabase project
+    // (Authentication → Sign In / Providers → Google) — see INSTALL.md.
+    google: true,
+
+    // Only @tufts.edu accounts may sign in, via ANY method (Google or
+    // email/password) — enforced in AuthContext after a session is
+    // established, since Google's `hd` OAuth hint (also driven by this
+    // value, see services/auth.js) is a UX nicety only and isn't a hard
+    // restriction for an External-type consent screen.
+    emailDomain: 'tufts.edu',
+  },
+
   // Which registered platforms (src/platforms/index.js) users can pick.
   platforms: ['spike'],
 

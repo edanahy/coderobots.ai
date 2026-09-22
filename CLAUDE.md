@@ -25,8 +25,27 @@ file in `src/config/instances/<id>.js`, selected at build time via the
 An instance config declares:
 
 - `brand` — name/logo/colors applied by `src/config/applyBrand.js`
-- `telemetry` — `true`: Supabase persistence + required email/password auth;
-  `false`: localStorage persistence, fully anonymous, no budget UI
+- `telemetry` — `true`: Supabase persistence + required auth; `false`:
+  localStorage persistence, fully anonymous, no budget UI
+- `auth.google` — (telemetry instances only) `true` shows "Continue with
+  Google" as the primary sign-in action in `AuthModal`, with email/password
+  moved behind a "sign in with email instead" toggle; requires the Google
+  provider to be enabled on that instance's Supabase project
+  (Authentication → Sign In / Providers → Google — see INSTALL.md §4d).
+  Omitted/`false` keeps the original password-only modal.
+- `auth.emailPassword` — (telemetry instances only) whether the
+  email/password form is offered at all. Defaults to `true` when omitted.
+  With `google: true` and this `false`, `AuthModal` shows only the Google
+  button (no "sign in with email instead" toggle) — Google-only auth. At
+  least one of `auth.google`/`auth.emailPassword` must be enabled or the
+  modal has no way to sign in.
+- `auth.emailDomain` — (telemetry instances only) restricts sign-in to
+  accounts whose email ends in this domain, via ANY auth method (Google or
+  email/password). Passed as Google's `hd` OAuth hint (UX filtering only)
+  and enforced for real in `AuthContext` after a session is established
+  (`violatesRequiredDomain` in `src/services/auth.js`) — a mismatched
+  session is immediately signed back out, since Google doesn't enforce `hd`
+  for an "External" consent screen. Omitted allows any domain.
 - `platforms` — allowlist of platform ids offered for new sessions
 - `chat.mode` — `'direct'` (client-side priming, model picker,
   budget-enforced endpoint) or `'tutor'` (server-side prompt pipeline)
@@ -113,7 +132,9 @@ a proxy that throws a descriptive error on first use (plus
 `isSupabaseConfigured` / `requireSupabase()`).
 
 Auth follows telemetry: `AuthContext.jsx` renders `SupabaseAuthProvider`
-(email/password) or `AnonymousAuthProvider` (static local user, no login).
+(email/password, plus Google OAuth via `src/services/auth.js`'s
+`signInWithGoogle` when `instance.auth.google` is set) or
+`AnonymousAuthProvider` (static local user, no login).
 
 ### Platform Abstraction
 

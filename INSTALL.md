@@ -138,6 +138,53 @@ reason.
    subject to change — if this looks different, the piece you need is the
    base project URL.)
 
+### 4d. (Optional) Enable Google Sign-In
+
+Only needed for instances that set `auth: { google: true }` in their
+`src/config/instances/<id>.js` (see CLAUDE.md → Instance Configuration).
+Skip this if the instance is fine with email/password only.
+
+You only need **one** Google Cloud OAuth client, even if you're doing this
+for multiple instances/Supabase projects — just add one redirect URI per
+Supabase project to it (step 3 below).
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → create or
+   select a project.
+2. **APIs & Services → OAuth consent screen**: User type "External" (unless
+   restricting to a Google Workspace org, e.g. `tufts.edu`). Fill in app
+   name/support email.
+   - **Watch for this:** while the consent screen is in "Testing"
+     publishing status, only test users you've explicitly added (max 100)
+     can sign in — everyone else is blocked. For a classroom rollout,
+     either add every student as a test user or publish the consent screen
+     ("In production"); the default `email`/`profile`/`openid` scopes this
+     app uses don't require Google's manual verification review.
+3. **APIs & Services → Credentials → Create Credentials → OAuth client ID
+   → Web application.**
+   - Authorized JavaScript origins: leave blank — not needed, since
+     Supabase does a server-side token exchange rather than client-side
+     Google JS.
+   - **Authorized redirect URIs**: add
+     `https://<your-project-ref>.supabase.co/auth/v1/callback` (the
+     project ref is the subdomain from step 4c's Data API URL). This is
+     the *only* redirect URI Google ever sees — never your app's Vercel or
+     localhost URLs. If you're enabling Google on more than one Supabase
+     project, add one of these per project to this same client.
+4. Copy the **Client ID** and **Client Secret**.
+5. Back in Supabase: **Authentication → Sign In / Providers → Google** →
+   enable, paste the Client ID + Secret, Save.
+6. **Authentication → URL Configuration**:
+   - **Site URL**: this instance's primary production URL.
+   - **Redirect URLs** (allow-list, supports wildcards) — add:
+     - `http://localhost:5173/**` for local dev.
+     - Your production domain: `https://<prod-domain>/**`.
+     - Your Vercel project's domain, wildcarded to cover every Preview
+       deployment: `https://<project>-*-<team>.vercel.app/**`.
+
+No `VITE_*` env var is needed for this anywhere (not `.env.local`, not in
+Vercel's env var settings) — the Client ID/Secret live only in Supabase's
+dashboard from step 5.
+
 ---
 
 ## 5. Set Up an AI Provider

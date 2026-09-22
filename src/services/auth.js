@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase';
+import instance from '../config/instance';
 
 const CAMPS_EMAIL_DOMAINS = ['tufts.edu', 'purdue.edu'];
 
@@ -80,6 +81,51 @@ export const signUpWithPassword = async (email, password) => {
   }
 
   return data;
+};
+
+/**
+ * Sign in with Google via Supabase OAuth. Redirects the browser to Google's
+ * consent screen; the resulting session is picked up afterward through
+ * onAuthStateChange, same as password auth.
+ */
+export const signInWithGoogle = async () => {
+  const emailDomain = instance.auth?.emailDomain;
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+      queryParams: {
+        // Without this, Google silently reuses whatever Google session is
+        // already active in the browser and skips the account picker once
+        // consent has been granted once — a real problem on a shared/lab
+        // machine where the previous student's Google session could
+        // otherwise carry over unnoticed.
+        prompt: 'select_account',
+        // Pre-filters the account chooser toward this Workspace domain.
+        // UX hint only — not a security boundary, see violatesRequiredDomain.
+        ...(emailDomain && { hd: emailDomain }),
+      },
+    },
+  });
+
+  if (error) {
+    console.error('Google sign-in error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Whether a signed-in user falls outside this instance's required email
+ * domain (if `instance.auth.emailDomain` is configured). Applies regardless
+ * of auth method, since Google's `hd` hint above isn't Google-enforced for
+ * an External consent screen — this is the real gate.
+ */
+export const violatesRequiredDomain = (user) => {
+  const requiredDomain = instance.auth?.emailDomain;
+  if (!requiredDomain || !user?.email) return false;
+
+  return !user.email.toLowerCase().endsWith(`@${requiredDomain.toLowerCase()}`);
 };
 
 /**

@@ -40,10 +40,21 @@
   background-color: #f0f0f0;
 }
 
+.auth-button.google-button {
+  color: #3c4043;
+}
+
 .auth-button img {
   width: 20px;
   height: 20px;
   margin-right: 12px;
+}
+
+.auth-domain-hint {
+  color: #6b7280;
+  font-size: 0.85rem;
+  margin-top: -15px;
+  margin-bottom: 20px;
 }
 
 .auth-error {

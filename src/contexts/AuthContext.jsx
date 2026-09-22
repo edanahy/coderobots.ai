@@ -11,11 +11,13 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import {
   signInWithPassword,
   signUpWithPassword,
+  signInWithGoogle,
   signOut,
   getSession,
   onAuthStateChange,
   isAdmin as checkIsAdmin,
   ensureAccessLevel,
+  violatesRequiredDomain,
 } from '../services/auth';
 import instance from '../config/instance';
 
@@ -36,6 +38,7 @@ const ANONYMOUS_AUTH_VALUE = {
   authError: null,
   signInWithPassword: async () => {},
   signUpWithPassword: async () => {},
+  signInWithGoogle: async () => {},
   signOut: async () => {},
 };
 
@@ -56,6 +59,13 @@ const SupabaseAuthProvider = ({ children }) => {
     // Check active session on mount
     getSession().then(async (session) => {
       if (session?.user) {
+        if (violatesRequiredDomain(session.user)) {
+          await signOut();
+          setAuthError(`Please sign in with a @${instance.auth.emailDomain} account.`);
+          setLoading(false);
+          return;
+        }
+
         await ensureAccessLevel(session.user);
 
         setSession(session);
@@ -68,9 +78,17 @@ const SupabaseAuthProvider = ({ children }) => {
 
     // Listen for auth changes
     const { data: authListener } = onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, session?.user?.email);
-
       if (session?.user) {
+        if (violatesRequiredDomain(session.user)) {
+          await signOut();
+          setSession(null);
+          setUser(null);
+          setIsAdmin(false);
+          setAuthError(`Please sign in with a @${instance.auth.emailDomain} account.`);
+          setLoading(false);
+          return;
+        }
+
         await ensureAccessLevel(session.user);
 
         setSession(session);
@@ -127,6 +145,17 @@ const SupabaseAuthProvider = ({ children }) => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    try {
+      setAuthError(null);
+      await signInWithGoogle();
+    } catch (error) {
+      setAuthError(error.message);
+      console.error('Google sign-in error:', error);
+      throw error;
+    }
+  };
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -147,6 +176,7 @@ const SupabaseAuthProvider = ({ children }) => {
     authError,
     signInWithPassword: handlePasswordSignIn,
     signUpWithPassword: handlePasswordSignUp,
+    signInWithGoogle: handleGoogleSignIn,
     signOut: handleSignOut,
   };
 
