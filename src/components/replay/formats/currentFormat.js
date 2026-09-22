@@ -13,7 +13,10 @@ const profile = {
   label: 'Current session export',
   hasCodeTabs: true,
   hasChatTabs: true,
-  hasSystemMessages: false,
+  // A `role: 'system'` message row is logged once per conversation as of
+  // the direct-chat system-priming fix — sessions exported from before that
+  // change simply won't have one, same as any other older-data omission.
+  hasSystemMessages: true,
   hasTokenStats: true,
   hasContextContent: true,
 };

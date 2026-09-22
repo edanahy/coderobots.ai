@@ -16,7 +16,7 @@ import ReplayView from './components/replay/ReplayView';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import instance from './config/instance';
-import { logConsole } from './services/dataLogger';
+import { logConsole, logInteraction } from './services/dataLogger';
 import {
   getUserProfile,
   saveUserProfile,
@@ -220,7 +220,10 @@ function AppContent() {
   const handleReplaceCode = async (newCode) => {
     // Create snapshot for AI replacement with the new code
     await createSnapshot('ai_replace', newCode);
-    
+    if (activeSession?.id) {
+      await logInteraction('replace_ai_code', activeSession.id);
+    }
+
     // Update the current code in session context (local state)
     await updateCurrentCodeContent(newCode);
   };
@@ -254,7 +257,8 @@ function AppContent() {
     try {
       // Create code snapshot for manual save
       await createSnapshot('manual_save');
-      
+      await logInteraction('manual_save', activeSession.id);
+
       // Get current code and console content
       const currentConsole = await getConsoleContent();
 

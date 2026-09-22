@@ -508,3 +508,51 @@ matched path prefix need to persist through client-side navigation and
 page refreshes (i.e. does it need to be more than just the initial-load
 resolution `HOST_INSTANCE` currently does)? How should an unrecognized
 first path segment be told apart from a legitimate app route/deep link?
+
+---
+
+## R12 — Surface message language (`lang`) in the session replay viewer
+
+**Status:** idea
+
+**Problem:** the 2026-09-22 logging audit added a `lang` column to
+`messages` (the UI language in effect when a message was sent/answered) and
+wired it into `/data`'s export (`DataExtractor.jsx`'s `MESSAGE_COLUMNS`),
+but stopped there deliberately — `scripts/merge_sessions_to_csv.py` doesn't
+read it into the merged per-session CSV, and the replay parsing chain
+(`formats/currentFormat.js`, `formats/canonical.js`, `replayModel.js`)
+doesn't carry it into a frame's message objects. So `lang` is exportable via
+`/data` but invisible in `/view-data` today.
+
+**Why it matters:** for a single-language instance (e.g. `tufts-en1`) this
+is a non-issue — `lang` is always `"en"`, so there's nothing worth seeing in
+replay. It only becomes useful for a bilingual/multi-language instance (the
+existing `skolegpt-dk` pattern, or any future instance with more than one
+`locales.available` entry) where a student could plausibly switch UI
+language mid-conversation and an instructor reviewing replay might want to
+see that per message, not just infer it from the `Session`'s locale.
+
+**Affected files:**
+- `scripts/merge_sessions_to_csv.py` — add a `Lang` column to
+  `EVENT_COLUMNS`, populate it from `r.get("lang")` on message events
+- `src/components/replay/formats/canonical.js` — the canonical event shape
+  would need a `lang` field
+- `src/components/replay/formats/currentFormat.js` — `parse()` would read
+  the new `Lang` column into that field
+- `src/components/replay/replayModel.js` — `buildFrames()` would carry it
+  onto each message object
+- `src/components/replay/ReplayChatPane.jsx` — would need to actually
+  render it somewhere (e.g. a small tag next to the message) if this is
+  worth surfacing visually, not just parsed
+
+**Possible approach:** straightforward plumbing through the four files
+above, in that order (source CSV → canonical shape → parser → consumer).
+The only real decision is `ReplayChatPane.jsx`'s presentation — likely a
+small, unobtrusive tag rather than a new column, given it'll be blank/absent
+for the vast majority of sessions from single-language instances.
+
+**Open questions:** worth doing ahead of need, or wait until a bilingual
+deployment actually wants to audit per-message language switching in
+replay? Should `formats/legacyFormat.js` (which predates `lang` entirely)
+get an explicit "unknown" marker, or just render blank the same as any other
+field a legacy session never had?

@@ -153,20 +153,14 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     }
   };
 
-  // Save just the last 20 rows of the console to the console tab. Used when a
-  // program finishes running, on reset, and on disconnect.
-  const logConsoleTailSafe = async (content, action) => {
-    const tail = (content || '').split('\n').slice(-20).join('\n');
-    await logConsoleSafe(tail, action);
-  };
-
   // If a run is armed and the REPL prompt has returned (program finished),
-  // save the console tail. Checks the accumulated buffer rather than a single
-  // serial chunk so a `>>> ` prompt split across reads is still detected.
+  // save the console buffer (already capped at FIFO_SIZE, so this is
+  // bounded). Checks the accumulated buffer rather than a single serial
+  // chunk so a `>>> ` prompt split across reads is still detected.
   const maybeSaveRunConsole = () => {
     if (pendingRunSaveRef.current && bufferRef.current.endsWith('>>> ')) {
       pendingRunSaveRef.current = false;
-      logConsoleTailSafe(bufferRef.current, 'run_device');
+      logConsoleSafe(bufferRef.current, 'run_device');
     }
   };
 
@@ -244,6 +238,8 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         ? tRef.current('disconnectingPlatformChanged')
         : tRef.current('disconnectingSwitchingTo').replace('{label}', activePlatform.label),
     });
+    logInteractionSafe('disconnect');
+    logConsoleSafe(bufferRef.current, 'disconnect');
     board.disconnect().catch((error) => {
       console.error('Failed to auto-disconnect after platform switch:', error);
     });
@@ -429,7 +425,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     } finally {
       arduinoFlashInFlightRef.current = false;
       setIsRunning(false);
-      await logConsoleTailSafe(bufferRef.current, 'run_device');
+      await logConsoleSafe(bufferRef.current, 'run_device');
     }
   };
 
@@ -488,6 +484,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   // Kick off the BLE library fetch as soon as the picker opens so the actual
   // requestDevice() call inside connectDevice stays within the user gesture.
   const handleLegoPickerOpen = () => {
+    void logInteractionSafe('open_lego_picker');
     preloadLegoLibrary();
   };
 
@@ -506,8 +503,10 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     return result;
   };
 
-  const handleLegoDeviceRename = (kind, oldName, newName) =>
-    legoRenameDevice(kind, oldName, newName);
+  const handleLegoDeviceRename = (kind, oldName, newName) => {
+    void logInteractionSafe('rename_lego_device');
+    return legoRenameDevice(kind, oldName, newName);
+  };
 
   const handleLegoDeviceDisconnect = async (kind, name) => {
     void logInteractionSafe('disconnect');
@@ -683,7 +682,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       try {
         setStatusBanner({ type: 'info', message: t('disconnecting') });
         await logInteractionSafe('disconnect');
-        await logConsoleTailSafe(bufferRef.current, 'disconnect');
+        await logConsoleSafe(bufferRef.current, 'disconnect');
         arduinoSessionRef.current = null;
         await disconnectEsp32(session);
         setConnected(false);
@@ -710,7 +709,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         message: t('disconnecting')
       });
       await logInteractionSafe('disconnect');
-      await logConsoleTailSafe(bufferRef.current, 'disconnect');
+      await logConsoleSafe(bufferRef.current, 'disconnect');
       await board.disconnect();
     }
     finally {
@@ -957,7 +956,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       }
     } finally {
       setIsRunning(false);
-      await logConsoleTailSafe(bufferRef.current, 'run_device');
+      await logConsoleSafe(bufferRef.current, 'run_device');
     }
   };
 
@@ -1051,7 +1050,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       // Never reset mid-flash — it would corrupt the write in progress.
       if (!session || !connected || arduinoFlashInFlightRef.current) return;
       await logInteractionSafe('reset_device');
-      await logConsoleTailSafe(bufferRef.current, 'reset_device');
+      await logConsoleSafe(bufferRef.current, 'reset_device');
       setIsRunning(false);
       arduinoIoRef.current?.write('\r\n\x1b[33m[reset]\x1b[0m\r\n');
       try {
@@ -1067,7 +1066,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     if (!board || !connected) return;
 
     await logInteractionSafe('reset_device');
-    await logConsoleTailSafe(bufferRef.current, 'reset_device');
+    await logConsoleSafe(bufferRef.current, 'reset_device');
 
     // We've saved the console here; don't let the reset's own `>>> ` prompt
     // trigger a duplicate run_device save.

@@ -24,6 +24,7 @@ import {
   getConversationHistory,
   getLatestCode,
   updateSessionOnLoad,
+  logInteraction,
 } from '../services/dataLogger';
 import { getPlatform } from '../platforms';
 import { getCurrentUserHardwareConfig, getHardwareCatalog, toPromptHardwareConfig } from '../services/hardwareConfig';
@@ -187,6 +188,7 @@ export const SessionProvider = ({ children }) => {
       }
       
       console.log(`✅ Active session set to: ${session.id}`);
+      logInteraction('switch_session', session.id);
       return true;
     } catch (error) {
       console.error('Error setting active session:', error);
@@ -243,6 +245,7 @@ export const SessionProvider = ({ children }) => {
       }
 
       console.log(`✅ Created new ${platformId} session: ${session.id}`);
+      logInteraction(`create_session_${platformId}`, session.id);
       return true;
     } catch (error) {
       console.error('Error creating session with platform:', error);
@@ -262,6 +265,7 @@ export const SessionProvider = ({ children }) => {
     }
     const updated = await setSessionHardwarePlatform(sessionId, platformId);
     if (!updated) return false;
+    logInteraction(`assign_platform_${platformId}`, sessionId);
     setPendingPlatformSession(null);
     await loadSessions();
     return await setActiveSessionById(sessionId);
@@ -299,6 +303,7 @@ export const SessionProvider = ({ children }) => {
         if (activeSession && activeSession.id === sessionId) {
           setActiveSession(updatedSession);
         }
+        logInteraction('rename_session', sessionId);
         // Reload sessions list to reflect the change
         await loadSessions();
         return true;
@@ -331,6 +336,7 @@ export const SessionProvider = ({ children }) => {
         setActiveSession(updatedSession);
       }
 
+      logInteraction('switch_conversation', activeSession.id);
       console.log(`✅ Switched to conversation ${conversationId}`);
       return true;
     } catch (error) {
@@ -352,12 +358,13 @@ export const SessionProvider = ({ children }) => {
       const name = `Chat ${conversations.length + 1}`;
       const newConversation = await createConversation(activeSession.id, name);
       if (newConversation) {
+        logInteraction('create_conversation', activeSession.id);
         // Reload conversations list
         await loadConversations(activeSession.id);
-        
+
         // Switch to the new conversation
         await switchConversation(newConversation.id);
-        
+
         return newConversation;
       }
       return null;
@@ -379,6 +386,7 @@ export const SessionProvider = ({ children }) => {
     try {
       const updatedConversation = await updateConversationNameService(conversationId, name);
       if (updatedConversation) {
+        logInteraction('rename_conversation', activeSession.id);
         // Reload conversations list to reflect the change
         await loadConversations(activeSession.id);
         return true;
@@ -418,6 +426,7 @@ export const SessionProvider = ({ children }) => {
         setActiveSession(updatedSession);
       }
 
+      logInteraction('switch_code_tab', activeSession.id);
       console.log(`✅ Switched to code ${codeId}`);
       return true;
     } catch (error) {
@@ -440,9 +449,10 @@ export const SessionProvider = ({ children }) => {
       const starterCode = getPlatform(activeSession.hardware_platform)?.starterCode;
       const newCode = await createCode(activeSession.id, name, starterCode);
       if (newCode) {
+        logInteraction('create_code_tab', activeSession.id);
         // Switch to the new code record (this will reload code records internally)
         await switchCode(newCode.id);
-        
+
         return newCode;
       }
       return null;
@@ -464,6 +474,7 @@ export const SessionProvider = ({ children }) => {
     try {
       const updatedCode = await updateCodeNameService(codeId, name);
       if (updatedCode) {
+        logInteraction('rename_code_tab', activeSession.id);
         // Reload code records list to reflect the change
         await loadCodeRecords(activeSession.id);
         return true;

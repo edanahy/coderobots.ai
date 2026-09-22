@@ -106,8 +106,13 @@ Sessions are the top-level unit. Each session has:
 - A **hardware_platform** chosen at creation — determines connection type, stop code, and AI priming
 - Multiple **conversations** (chat tabs) — one is "current"
 - Multiple **code records** (code tabs) — one is "current"
-- **Code snapshots** logged automatically at key events (`run_device`, `manual_save`, `ai_replace`, `chat_context`)
-- **Console logs** and **interactions** (button clicks) also persisted
+- **Code snapshots**, **console logs**, and **interactions** (button/session/conversation/code-tab lifecycle events) logged automatically at key events
+
+`DATA_COLLECTION.md` is the authoritative, maintained reference for exactly
+which events are logged, the full `save_source`/`button_name` value lists,
+and known logging limitations (tutor mode, hard-tab-close residual risk) —
+keep it in sync when adding a platform or a new loggable action rather than
+re-deriving this from the code each time.
 
 All database schemas are defined as Zod schemas in `src/services/dbSchemas.js`. Supabase table names are in the `TABLES` constant there. Always validate inserts through these schemas.
 

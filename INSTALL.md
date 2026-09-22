@@ -1042,6 +1042,7 @@ create table public.messages (
   completion_tokens integer null,
   code_context_id bigint null,
   console_context_id bigint null,
+  lang text null,
   timestamp timestamp with time zone not null default now(),
   constraint messages_pkey1 primary key (id),
   constraint messages_code_context_id_fkey foreign KEY (code_context_id) references code (id) on update CASCADE on delete RESTRICT,
@@ -1346,6 +1347,10 @@ alter table public.messages drop constraint if exists messages_console_context_i
 alter table public.messages add constraint messages_console_context_id_fkey
   foreign key (console_context_id) references public.console (id) on update cascade on delete set null;
 
+alter table public.messages drop constraint if exists messages_code_context_id_fkey;
+alter table public.messages add constraint messages_code_context_id_fkey
+  foreign key (code_context_id) references public.code (id) on update cascade on delete set null;
+
 -- ---------- circular FKs on sessions: SET NULL to break the cycle ----------
 
 alter table public.sessions drop constraint if exists sessions_current_code_id_fkey;
@@ -1362,6 +1367,22 @@ alter table public.sessions add constraint sessions_current_conversation_id_fkey
 
 commit;
 ```
+
+> **Already have a project provisioned from an earlier version of this
+> guide?** Two fixes landed after the initial version of this script:
+> `messages.code_context_id` was missing the `on delete set null` behavior
+> its sibling `console_context_id` already had (without it, deleting a
+> session/user whose messages reference an attached-code snapshot can fail
+> with a foreign-key violation instead of cascading cleanly), and a `lang`
+> column was added to `messages` to record the UI language a message was
+> sent/answered in. Run this once, safely re-runnable:
+> ```sql
+> alter table public.messages drop constraint if exists messages_code_context_id_fkey;
+> alter table public.messages add constraint messages_code_context_id_fkey
+>   foreign key (code_context_id) references public.code (id) on update cascade on delete set null;
+>
+> alter table public.messages add column if not exists lang text null;
+> ```
 
 ### 11.11 — Setup verification query
 
@@ -1454,6 +1475,12 @@ cascade_check as (
          case when confdeltype = 'c' then 'OK' else 'MISSING (§11.10)' end as status,
          ''::text as detail
   from pg_constraint where conname = 'sessions_user_id_fkey'
+),
+context_fk_check as (
+  select 'messages.code_context_id sets null on delete' as check_name,
+         case when confdeltype = 'n' then 'OK' else 'MISSING (§11.10)' end as status,
+         ''::text as detail
+  from pg_constraint where conname = 'messages_code_context_id_fkey'
 )
 select * from table_check
 union all select * from function_check
@@ -1464,6 +1491,7 @@ union all select * from circular_fk_check
 union all select * from policy_check
 union all select * from grant_check
 union all select * from cascade_check
+union all select * from context_fk_check
 order by status, check_name;
 ```
 

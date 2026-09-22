@@ -8,7 +8,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useSession } from '../contexts/SessionContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { logMessage, logConsole } from '../services/dataLogger';
+import { logMessage, logConsole, logInteraction } from '../services/dataLogger';
 import { streamChatCompletionWithBudget, streamTutorCompletion } from '../utils/chatStream';
 import { getUserAccessLevel, getDailyBudgetUsage } from '../services/aiUsage';
 import { fetchModelMetadata, pickInitialModel } from '../services/aiModels';
@@ -232,6 +232,13 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     refreshDailyUsage();
   }, [userAccessLevel]);
 
+  const handleModelChange = (model) => {
+    if (activeSession?.id) {
+      logInteraction(`switch_model_${model}`, activeSession.id);
+    }
+    setSelectedModel(model);
+  };
+
   const scrollToBottom = () => {
     if (chatBodyRef.current) {
       requestAnimationFrame(() => {
@@ -361,6 +368,8 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     const conversationId = currentConversationId;
     let consoleContextId = null;
 
+    await logInteraction('send_message', sessionId);
+
     if (finalContext.console && finalContext.console.trim()) {
       consoleContextId = await logConsole(finalContext.console, sessionId, 'chat_context');
     }
@@ -374,6 +383,7 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         coding_level: codingLevel,
         code_context_id: codeContextId,
         console_context_id: consoleContextId,
+        lang,
       });
     }
 
@@ -418,10 +428,10 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         });
       };
 
-      try {
-        let fullResponse = '';
-        const thinking = [];
+      let fullResponse = '';
+      const thinking = [];
 
+      try {
         // Insert a placeholder bot message immediately so the thinking trace
         // is visible while progress events arrive (before the first token).
         setMessages(prev => [...prev, { role: 'bot', content: '', thinking: [], streaming: true }]);
@@ -440,19 +450,36 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         // Finalize message
         updateLast({ content: fullResponse, thinking: [...thinking], streaming: false });
 
-        // Log assistant message
+        // Log assistant message. Tokens are always null here: the tutor
+        // pipeline makes several real LLM calls per turn but never reports
+        // usage back to the client, so `0` would falsely read as "measured
+        // and free" rather than "not measured."
         await logMessage({
           conversation_id: conversationId,
           role: 'assistant',
           content: fullResponse,
           coding_level: codingLevel,
           ai_model: TUTOR_AI_MODEL,
-          prompt_tokens: 0,
-          completion_tokens: 0,
+          prompt_tokens: null,
+          completion_tokens: null,
+          lang,
         });
       } catch (error) {
         console.error('Streaming error:', error);
         updateLast({ content: `${t('errorPrefix')}${error.message}`, streaming: false });
+
+        // Log whatever we have so a failed/interrupted turn leaves a trace
+        // instead of an orphaned user question with no reply on record.
+        await logMessage({
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullResponse || `[No response — request failed: ${error.message}]`,
+          coding_level: codingLevel,
+          ai_model: TUTOR_AI_MODEL,
+          prompt_tokens: null,
+          completion_tokens: null,
+          lang,
+        });
       } finally {
         setIsStreaming(false);
         setStreamingConversationId(null);
@@ -461,32 +488,41 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
       return;
     }
 
-    // Build conversation for AI
-    const conversation = [];
-    
-    // Add system priming
-    conversation.push({
-      role: 'system',
-      content: getSystemPriming(),
-    });
+    // Build conversation for AI. Collected as a list first (rather than
+    // pushed straight into `conversation`) so the exact same pieces can also
+    // be logged below — one source of truth for what's sent vs. what's saved.
+    const systemPieces = [getSystemPriming()];
 
     // Add coding level instructions
     const levelInstructions = getLevelPrompt(codingLevel);
     if (levelInstructions) {
-      conversation.push({
-        role: 'system',
-        content: `${LEVEL_INSTRUCTION_PREFIX}\n\n${levelInstructions}`,
-      });
+      systemPieces.push(`${LEVEL_INSTRUCTION_PREFIX}\n\n${levelInstructions}`);
     }
 
     // Answer in the UI language (priming/level prompts stay English —
     // instruction-following is better with English system prompts).
     if (lang && lang !== 'en') {
-      conversation.push({
+      systemPieces.push(RESPONSE_LANGUAGE_DIRECTIVES[lang] || RESPONSE_LANGUAGE_DIRECTIVES.da);
+    }
+
+    // Log the exact system priming the first time it's established for this
+    // conversation, so the instructions actually in effect for this and
+    // later turns are reconstructable later instead of only inferable from
+    // coding_level/ai_model on the surrounding messages.
+    if (messages.length === 0) {
+      await logMessage({
+        conversation_id: conversationId,
         role: 'system',
-        content: RESPONSE_LANGUAGE_DIRECTIVES[lang] || RESPONSE_LANGUAGE_DIRECTIVES.da,
+        content: systemPieces.join('\n\n---\n\n'),
+        coding_level: codingLevel,
+        lang,
       });
     }
+
+    const conversation = [];
+    systemPieces.forEach((content) => {
+      conversation.push({ role: 'system', content });
+    });
 
     // Add conversation history
     messages.forEach(msg => {
@@ -519,14 +555,16 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     streamingMessageRef.current = '';
     let isFirstChunk = true;
 
+    // Determine which model to use
+    const actualModel = selectedModel;
+    // Hoisted above the try so the catch block can still log whatever
+    // streamed successfully before an interruption/error, instead of the
+    // whole assistant turn vanishing with no trace.
+    let fullResponse = '';
+    let budgetStatus = null;
+    let usageData = null;
+
     try {
-      let fullResponse = '';
-      let budgetStatus = null;
-      let usageData = null;
-
-      // Determine which model to use
-      const actualModel = selectedModel;
-
       for await (const event of streamChatCompletionWithBudget(conversation, actualModel)) {
         if (event.type === 'content') {
           fullResponse += event.content;
@@ -576,15 +614,18 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         });
       }
 
-      // Log assistant message first to get the message ID
-      const loggedMessage = await logMessage({
+      // Log assistant message. Tokens are null (not 0) when the provider
+      // never reported usage (e.g. SkoleGPT, or a swallowed backend logging
+      // error) — 0 would falsely read as "measured and free."
+      await logMessage({
         conversation_id: conversationId,
         role: 'assistant',
         content: fullResponse,
         coding_level: codingLevel,
         ai_model: actualModel,
-        prompt_tokens: usageData?.input_tokens || 0,
-        completion_tokens: usageData?.output_tokens || 0,
+        prompt_tokens: usageData?.input_tokens ?? null,
+        completion_tokens: usageData?.output_tokens ?? null,
+        lang,
       });
 
       // Check budget status and show modal if budget exceeded
@@ -594,10 +635,10 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
 
     } catch (error) {
       console.error('Streaming error:', error);
-      
+
       // Check if this is a budget error
       const isBudgetError = error.message && error.message.includes('exceeded their budget');
-      
+
       if (isBudgetError) {
         // Show budget error modal, don't add any bot message
         setBudgetErrorVisible(true);
@@ -618,6 +659,19 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         }
         // If we didn't start streaming yet, don't add any error message
       }
+
+      // Log whatever we have so a failed/interrupted turn leaves a trace
+      // instead of an orphaned user question with no reply on record.
+      await logMessage({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: fullResponse || `[No response — ${isBudgetError ? 'blocked: daily budget exceeded' : `request failed: ${error.message}`}]`,
+        coding_level: codingLevel,
+        ai_model: actualModel,
+        prompt_tokens: null,
+        completion_tokens: null,
+        lang,
+      });
     } finally {
       setIsStreaming(false);
       setStreamingConversationId(null);
@@ -650,6 +704,9 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(currentCodeSnippet.code);
+    if (activeSession?.id) {
+      logInteraction('copy_ai_code', activeSession.id);
+    }
     closeCodeModal();
   };
 
@@ -817,7 +874,7 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         showModelPicker={!TUTOR_MODE}
         showUsage={SHOW_BUDGET_UI}
         selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
+        onModelChange={handleModelChange}
         modelsByProvider={modelMetadata.modelsByProvider}
         streamableByModel={modelMetadata.streamableByModel}
         selectedModelStreaming={selectedModelStreaming}

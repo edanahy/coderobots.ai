@@ -135,8 +135,8 @@ export const messageSchema = z.object({
   completion_tokens: z.number().int().optional().nullable(),
   code_context_id: fields.idOptional,
   console_context_id: fields.idOptional,
+  lang: z.string().optional().nullable(),
   timestamp: fields.timestamp,
-  port_configurations: z.string().optional().nullable(),
 });
 
 /**
@@ -153,34 +153,26 @@ export const messageInsertSchema = z.object({
   completion_tokens: z.number().int().optional().nullable(),
   code_context_id: fields.idOptional,
   console_context_id: fields.idOptional,
-  port_configurations: z.string().optional().nullable(),
+  lang: z.string().optional().nullable(),
 });
 
-/**
- * Data for updating an existing message
- */
-export const messageUpdateSchema = z.object({
-  content: z.string().optional().nullable(),
-  prompt_tokens: z.number().int().optional().nullable(),
-  completion_tokens: z.number().int().optional().nullable(),
-  port_configurations: z.string().optional().nullable(),
-}).partial();
+// messages is write-once from the app (insert-only Data API grant — see
+// INSTALL.md §11.9); there is no update path, so no messageUpdateSchema.
 
 // ============================================================================
 // CODE TABLE
 // ============================================================================
 
 /**
- * Valid save sources for code
+ * `save_source` (on both `code` and `code_snapshots`) is a free-form string,
+ * not a DB-level enum — new hardware platforms are expected to introduce new
+ * values (e.g. `save_to_slot_<n>` for SPIKE program slots), so it's
+ * intentionally left as an unconstrained string below rather than a closed
+ * Zod enum that would need editing for every new platform. Known values as
+ * of this writing (see DATA_COLLECTION.md for the authoritative, maintained
+ * list): init, tab_create, live_edit, manual_save, chat_context, ai_replace,
+ * run_device, save_to_main_py, save_to_slot_<n>, download_to_microbit.
  */
-export const codeSaveSourceSchema = z.enum([
-  'init',
-  'tab_create',
-  'live_edit',
-  'chat_context',
-  'manual_save',
-  'run_code',
-]);
 
 /**
  * Full code record from database
@@ -371,8 +363,7 @@ export const prepareInsert = (schema, data) => {
  * 
  * @typedef {z.infer<typeof messageSchema>} Message
  * @typedef {z.infer<typeof messageInsertSchema>} MessageInsert
- * @typedef {z.infer<typeof messageUpdateSchema>} MessageUpdate
- * 
+ *
  * @typedef {z.infer<typeof codeSchema>} Code
  * @typedef {z.infer<typeof codeInsertSchema>} CodeInsert
  * @typedef {z.infer<typeof codeUpdateSchema>} CodeUpdate
