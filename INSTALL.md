@@ -140,9 +140,31 @@ reason.
 
 ### 4d. (Optional) Enable Google Sign-In
 
-Only needed for instances that set `auth: { google: true }` in their
-`src/config/instances/<id>.js` (see CLAUDE.md → Instance Configuration).
-Skip this if the instance is fine with email/password only.
+Only needed for instances that set `auth.google: true` in their
+`src/config/instances/<id>.js`. Skip this if the instance is fine with
+email/password only.
+
+This is instance-level config, not an env var — it lives in the instance
+file itself, e.g. `src/config/instances/tufts-en1.js` (a real working
+example already in this repo):
+
+```js
+auth: {
+  // Shows "Continue with Google" as the primary sign-in action in
+  // AuthModal, with email/password moved behind a toggle.
+  google: true,
+
+  // Optional — omit for "any Google/email account may sign in." Restricts
+  // sign-in to accounts on this domain, via ANY method (Google or
+  // email/password). See "Restricting to a Workspace domain" below.
+  emailDomain: 'tufts.edu',
+
+  // Optional — defaults to true. Set false to hide the email/password
+  // form entirely (Google-only auth). Requires auth.google: true, since at
+  // least one sign-in method must be enabled.
+  emailPassword: true,
+},
+```
 
 You only need **one** Google Cloud OAuth client, even if you're doing this
 for multiple instances/Supabase projects — just add one redirect URI per
@@ -150,9 +172,11 @@ Supabase project to it (step 3 below).
 
 1. [console.cloud.google.com](https://console.cloud.google.com) → create or
    select a project.
-2. **APIs & Services → OAuth consent screen**: User type "External" (unless
-   restricting to a Google Workspace org, e.g. `tufts.edu`). Fill in app
-   name/support email.
+2. **APIs & Services → OAuth consent screen**: User type "External" (this
+   is what's needed even when restricting sign-in to one Workspace domain
+   like `tufts.edu` via `auth.emailDomain` above — see the note below on
+   why "Internal" isn't the right tool for that). Fill in app name/support
+   email.
    - **Watch for this:** while the consent screen is in "Testing"
      publishing status, only test users you've explicitly added (max 100)
      can sign in — everyone else is blocked. For a classroom rollout,
@@ -180,10 +204,32 @@ Supabase project to it (step 3 below).
      - Your production domain: `https://<prod-domain>/**`.
      - Your Vercel project's domain, wildcarded to cover every Preview
        deployment: `https://<project>-*-<team>.vercel.app/**`.
+     - If you've set up a custom domain (Step 9), add that too — see 9d.
 
 No `VITE_*` env var is needed for this anywhere (not `.env.local`, not in
 Vercel's env var settings) — the Client ID/Secret live only in Supabase's
 dashboard from step 5.
+
+**Restricting to a Workspace domain (`auth.emailDomain`):** it's tempting to
+use Google's own "Internal" consent-screen user type to restrict sign-in to
+one Workspace org (e.g. only `@tufts.edu` accounts) — but that's the wrong
+tool here, since "Internal" requires *you* (the app owner) to also belong to
+that same Workspace org, which won't be true for most deployments. Instead,
+this app enforces the domain restriction itself:
+- Setting `auth.emailDomain` (as in the config example above) passes that
+  domain to Google as an `hd` login hint (`signInWithGoogle` in
+  `src/services/auth.js`), which pre-filters the Google account picker
+  toward that domain — but this is a **UX nicety only**, not a real
+  restriction (Google doesn't enforce `hd` for an "External" consent
+  screen, so a user could still pick a non-matching account).
+- The actual enforcement happens after sign-in, client-side: `AuthContext`
+  checks the signed-in user's email against `auth.emailDomain`
+  (`violatesRequiredDomain` in `src/services/auth.js`) and immediately
+  signs out any session that doesn't match — regardless of whether they
+  signed in via Google or email/password.
+- No extra Google Cloud or Supabase configuration is needed for this beyond
+  what's already above — it's purely the `auth.emailDomain` instance-config
+  value.
 
 ---
 
