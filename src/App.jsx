@@ -12,6 +12,8 @@ import StudentGroupModal from './components/StudentGroupModal';
 import DebugManager, { debugLog } from './components/DebugManager';
 import DataExtractor from './components/data_extractor/DataExtractor';
 import AdminUsageDashboard from './components/admin_usage/AdminUsageDashboard';
+import AdminUsersDashboard from './components/admin_users/AdminUsersDashboard';
+import AdminUserDetail from './components/admin_users/AdminUserDetail';
 import ReplayView from './components/replay/ReplayView';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SessionProvider, useSession } from './contexts/SessionContext';
@@ -397,6 +399,12 @@ function App() {
                 )}
                 {instance.routes.admin && (
                   <Route path="/usage" element={<AdminUsageDashboard />} />
+                )}
+                {instance.routes.admin && (
+                  <Route path="/users" element={<AdminUsersDashboard />} />
+                )}
+                {instance.routes.admin && (
+                  <Route path="/users/:userId" element={<AdminUserDetail />} />
                 )}
               </Routes>
             </SessionProvider>

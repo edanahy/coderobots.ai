@@ -84,6 +84,10 @@ Routes in `App.jsx` (admin routes only when `instance.routes.admin`):
 - `/` — Main editor + chat UI (`AppContent`)
 - `/data` — `DataExtractor` admin tool for exporting session data
 - `/usage` — `AdminUsageDashboard` for monitoring AI usage
+- `/users` — `AdminUsersDashboard` (roster overview) + `AdminUserDetail`
+  (`/users/:userId`, per-student activity drill-down); no in-app nav links
+  to any admin route today — reached by URL, same as `/data`/`/usage` (see
+  `ROADMAP.md` R13 for the deferred "add a nav" idea)
 - `/view-data` — `ReplayView` session replay viewer
 
 ### Localization
@@ -131,7 +135,7 @@ adapter selected in `src/services/persistence/index.js`:
 
 The adapter interface IS the original function signatures/row shapes — keep
 both implementations in sync (interface documented in `persistence/index.js`).
-`adminUsage.js` and `dataExport.js` bypass the seam (admin-only routes).
+`adminUsage.js`, `adminUsers.js`, and `dataExport.js` bypass the seam (admin-only routes).
 `src/services/supabase.js` never throws at import: without env vars it exports
 a proxy that throws a descriptive error on first use (plus
 `isSupabaseConfigured` / `requireSupabase()`).
@@ -230,6 +234,7 @@ Keep `src/platforms/lego/priming.js` (direct-mode LEGO docs) in sync with `modal
 - `src/services/hardwareConfig.js` — LilyBot wiring facade (+ `hardwareParts.js` pure helpers)
 - `src/services/aiUsage.js` — daily budget usage facade (+ `etTime.js` ET day boundaries)
 - `src/services/adminUsage.js` — aggregate usage data for admin dashboard (direct Supabase)
+- `src/services/adminUsers.js` — roster + per-user activity for `/users` (direct Supabase)
 - `src/config/instance.js` — instance config selector (`VITE_INSTANCE`)
 
 ### Git Archaeology

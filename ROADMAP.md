@@ -556,3 +556,44 @@ deployment actually wants to audit per-message language switching in
 replay? Should `formats/legacyFormat.js` (which predates `lang` entirely)
 get an explicit "unknown" marker, or just render blank the same as any other
 field a legacy session never had?
+
+---
+
+## R13 — Consolidate admin tools into a nav/hub
+
+**Status:** idea
+
+**Problem:** there is currently zero in-app navigation to any admin-only
+page — `/data`, `/usage`, and (as of the 2026-09-22 `/users` roster/
+drill-down addition) `/users` are all reached by typing or bookmarking the
+URL directly. `TitleBar.jsx` (rendered on every page, admin or not) has no
+awareness of `isAdmin` or of these routes at all. This was a deliberate,
+explicit choice when `/users` was added (asked and confirmed with the user
+rather than assumed) — kept consistent with how `/data`/`/usage` already
+worked, rather than adding nav for just the new page.
+
+**Why it matters:** with three admin routes now instead of two, "type the
+URL from memory" gets less sustainable, especially for a page like `/users`
+that's meant to be checked *routinely* (a "gut check" tool an instructor
+returns to often) rather than occasionally like a one-off data export.
+
+**Affected files:**
+- `src/components/TitleBar.jsx` — would need `isAdmin`/`instance.routes.admin`
+  threaded in as props (from `AppContent` in `src/App.jsx`, which already
+  has `useAuth()` in scope) to conditionally render admin links
+- Alternatively/additionally: a single `/admin` index/landing route that
+  just links out to `/data`/`/usage`/`/users`, rather than inline TitleBar
+  links — lower blast radius (doesn't touch the always-rendered TitleBar),
+  but adds a click versus a direct link
+
+**Possible approach:** start with the smallest version — a small
+admin-only "Admin ▾" menu or button group in `TitleBar.jsx`, visible only
+when `isAdmin && instance.routes.admin`, linking to all three (then any
+future) admin routes. A dedicated `/admin` hub page is a reasonable
+alternative if the TitleBar starts feeling crowded, but isn't obviously
+needed for three links.
+
+**Open questions:** TitleBar links vs. a dedicated `/admin` hub page —
+does this want to scale to enough admin surfaces that a real hub page (with
+its own descriptions/cards, not just links) earns its keep, or do three
+plain links suffice indefinitely?

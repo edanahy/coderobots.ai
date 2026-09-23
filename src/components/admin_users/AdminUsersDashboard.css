@@ -1,0 +1,86 @@
+@import '../AdminPages.css';
+
+.admin-main {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.admin-content {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.admin-users-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-users-search {
+  max-width: 20rem;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+
+.admin-table thead tr {
+  border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+}
+
+.admin-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.admin-users-sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.admin-users-sortable-th:hover {
+  color: #e2e8f0;
+}
+
+.admin-table tbody tr {
+  border-bottom: 1px solid rgba(30, 41, 59, 1);
+}
+
+.admin-users-row {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.admin-users-row:hover {
+  background-color: rgba(51, 65, 85, 0.35);
+}
+
+.admin-table td {
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  color: #cbd5e1;
+}
+
+.admin-table td.empty {
+  padding: 1rem;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.admin-users-never-active {
+  color: #f87171;
+  font-weight: 600;
+}

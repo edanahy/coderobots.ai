@@ -3,6 +3,11 @@
 This document describes every piece of data this app persists to Supabase
 (on a `telemetry: true` instance — see `src/config/instances/`), when each
 row is written, and what gets included in the admin data export at `/data`.
+Other admin-only surfaces read this same data live rather than exporting
+it: `/usage` (AI cost/token spend, `src/services/adminUsage.js`) and
+`/users` (per-student roster + activity drill-down, `src/services/adminUsers.js`)
+— see the note near the `ai_usage` table and "What is not in the export"
+below for how `/users` relates to what's covered here.
 
 All tables live in the `public` schema and have row-level security (RLS)
 enabled. Regular users can only read/write their own rows; admins have read
@@ -342,6 +347,10 @@ Both filters apply to **every** table in the export and are combined with AND:
 ### Turning an export into a replayable session (`/view-data`)
 
 The `/view-data` Session Replay Viewer (`src/components/replay/`) doesn't consume the raw per-table CSVs directly — it expects one merged, chronologically-sorted CSV per session. `scripts/merge_sessions_to_csv.py` is the bridge: point it at a folder containing the eight table CSVs from a `/data` export (as `research_data/*.csv`) and it writes one `session_<id>.csv` per session, grouped into per-student folders, dereferencing `code_context_id`/`console_context_id` into the actual attached content along the way. Feed one of those merged files into the `/view-data` upload screen.
+
+### The routine gut-check at `/users`
+
+`src/components/admin_users/` (`AdminUsersDashboard.jsx` + `AdminUserDetail.jsx`, data via `src/services/adminUsers.js`) is a live-query alternative to exporting: a roster table (every `user_profiles` row, including zero-activity signups) with session/message/run counts and a "last active" signal derived from the max of `sessions`/`messages`/`code_snapshots`/`interactions` timestamps for that user — there is no real last-sign-in timestamp available client-side (`auth.users.last_sign_in_at` isn't exposed via RLS), so this is the practical substitute. Clicking a student opens a per-user drill-down: their full session list plus a merged, newest-first activity feed (messages, code saves, console captures, interactions) bounded to a time range, reusing `CodeModal`/`ConsoleModal` to view full content. It relies entirely on the "admins can read all rows" RLS policies already covered above — no new tables, columns, or grants.
 
 ### What is **not** in the export
 
