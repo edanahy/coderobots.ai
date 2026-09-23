@@ -1073,9 +1073,8 @@ a provider your Modal deployment doesn't support (per
 -- If using OpenAI:
 INSERT INTO public.ai_models (model_name, provider, input_price, cached_input_price, output_price, unlimited, streamable, "default")
 VALUES
-  ('gpt-5.4', 'openai', 2.50, 0.25, 15, FALSE, FALSE, FALSE),
-  ('gpt-5.4-mini', 'openai', 0.75, 0.075, 4.50, FALSE, FALSE, FALSE),
-  ('gpt-5.4-nano', 'openai', 0.20, 0.02, 1.25, TRUE, TRUE, TRUE);
+  ('gpt-6-sol', 'openai', 2.00, 0.20, 10, FALSE, FALSE, FALSE),
+  ('gpt-6-luna', 'openai', 0.10, 0.01, 0.50, TRUE, TRUE, TRUE);
 ```
 
 ```sql
