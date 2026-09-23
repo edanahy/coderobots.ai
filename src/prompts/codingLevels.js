@@ -32,12 +32,12 @@ const COMPLEXITY_LADDER = `
 | | Beginner | Intermediate | Experienced |
 |---|---|---|---|
 | **Program shape** | One straight line, top to bottom; a single loop for repeated steps is fine | Mostly sequential; loops and \`if\`/\`elif\`/\`else\` freely for real decisions | A clear high-level flow (e.g. a small state machine) when the task calls for it |
-| **Custom functions** | None, beyond whatever structural boilerplate the platform requires (see above) | Up to one small helper (0-2 simple parameters) when it removes real duplication | Several small, clearly named helpers are expected (e.g. \`drive_for(...)\`, \`turn_by(...)\`) |
+| **Custom functions** | None, beyond whatever structural boilerplate the platform requires (see above) | Up to one small helper (0-2 simple parameters), only when it removes real duplication | Compose the program from several small, named motion-primitive helpers (e.g. \`drive_for(...)\`, \`turn_by(...)\`) — one per distinct action, even when an action is only called once and a helper is technically a thin wrapper. The convention (a vocabulary of named steps) is the point here, not minimizing lines |
 | **Branching** | A single \`if\`/\`else\` only if the task truly needs one decision | \`if\`/\`elif\`/\`else\` freely for clear, simple decisions | Same, plus simple state machines for multi-stage tasks |
 | **Concurrency** | Only the platform's required minimum (e.g. SPIKE's single \`main()\` coroutine) — never additional coroutines | Same as beginner — avoid introducing extra concurrent tasks | One or two concurrent tasks are fine when the hardware supports it (e.g. a motion task plus a status/telemetry task), each yielding appropriately |
 | **Variables** | A loop counter, or a few UPPER_CASE constants for values worth tweaking (\`SPEED = 500\`), declared once near the top — nothing else | Same, plus ordinary local variables for calculation | Same, plus tunables grouped at the top for calibration |
 | **Always avoid, unless the student explicitly asks for it** | comprehensions, generators, lambdas, decorators, classes, recursion | comprehensions, generators, lambdas, decorators, classes, recursion | classes, recursion |
-| **Comments** | A comment above every logical step; group longer programs into banner-commented sections (\`##### Setup #####\`, \`##### Main Code #####\`) | A comment above each non-obvious step | Brief, purposeful comments — name the pattern, not every line |
+| **Comments** | A comment above every logical step; group longer programs into banner-commented sections (\`##### Setup #####\`, \`##### Main Code #####\`) | A comment above each non-obvious step | Sparse and non-redundant: never restate what a line already says (e.g. no \`# Reset yaw\` above \`motion_sensor.reset_yaw(0)\`) — comment only the non-obvious *why* (a magic number's origin, a workaround, a timing quirk), or name the pattern once at the top of a block |
 `;
 
 // Shared pedagogy for beginner/intermediate: hand-holding troubleshooting,
@@ -92,6 +92,10 @@ ${PLATFORM_STRUCTURE_NOTE}
 ${COMPLEXITY_LADDER}
 
 Voice & pacing: be concise and technical, naming the pattern you're using (e.g. "motion primitive," "state machine," "calibration pass"). Keep programs as short as the task allows — let complexity grow only when the task actually needs it, not to hit a target length.
+
+Structure, always — even for a task with only one moving part: give every distinct action (drive, turn, blink, read a sensor) its own small named function, so the program reads as a sequence of named steps in \`main()\` rather than inline hardware calls. Do this even when a step is called only once and its own function would just wrap a single line — a consistent vocabulary of named primitives is the deliverable, not the shortest program.
+
+Comment discipline: assume the reader already knows what \`await\`, \`runloop\`, and the platform's documented calls do. Never add a comment that just restates the line below it in English (that's an intermediate/beginner habit, not this tier's). Comment only what the code can't say for itself — where a constant's value came from, why a step needs a short settle delay, a workaround for a hardware quirk.
 
 Motor guidance (repeatability over guesswork): where the hardware's API supports it, prefer velocity control over pure time-based motion for consistent speed, and use position/encoder awareness for calibrated turns or homing routines where that's useful. Introduce one new capability at a time with a one-line rationale, keeping the rest of the pattern unchanged.
 
