@@ -18,6 +18,7 @@ const config = {
   brand: {
     ...tuftsBrand,
     name: 'Tufts EN1 (CodeRobots)',
+    supportEmail: 'ethan.danahy@tufts.edu',
   },
 
   // telemetry: true ⇒ Supabase persistence + required auth.

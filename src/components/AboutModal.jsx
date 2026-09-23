@@ -4,8 +4,11 @@
  */
 
 import { useLanguage } from '../contexts/LanguageContext';
+import instance from '../config/instance';
 import './ModalBase.css';
 import './AboutModal.css';
+
+const { supportEmail } = instance.brand;
 
 const AboutModal = ({ visible, onClose }) => {
   const { t } = useLanguage();
@@ -22,7 +25,7 @@ const AboutModal = ({ visible, onClose }) => {
         <div className="about-info-section">
           <div className="about-info-row">
             <span className="about-info-label">{t('version')}</span>
-            <span className="about-info-value">May 28, 2026</span>
+            <span className="about-info-value">{__APP_VERSION__}</span>
           </div>
 
           <div className="about-info-row">
@@ -36,11 +39,11 @@ const AboutModal = ({ visible, onClose }) => {
         <div className="about-footer">
           <p className="about-contact">
             {t('bugReportPrefix')}{' '}
-            <a 
-              href="mailto:duncanjohnson99@gmail.com" 
+            <a
+              href={`mailto:${supportEmail}`}
               className="about-link"
             >
-              duncanjohnson99@gmail.com
+              {supportEmail}
             </a>
             .
           </p>

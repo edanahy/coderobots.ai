@@ -3,6 +3,8 @@ import instance from './instance';
 const brand = instance.brand;
 
 export function applyBrand() {
+  document.title = brand.name;
+
   const root = document.documentElement.style;
   root.setProperty('--brand-primary', brand.colors.primary);
   root.setProperty('--brand-primary-text', brand.colors.primaryText);

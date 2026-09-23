@@ -1,6 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+
+const pkg = JSON.parse(
+    readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf-8')
+)
 
 // LEGO Education mode runs Pyodide in a Web Worker and uses SharedArrayBuffer
 // + Atomics.wait for synchronous JS→main-thread RPC. Browsers only expose
@@ -14,6 +20,9 @@ const crossOriginIsolationHeaders = {
 }
 
 export default defineConfig({
+    define: {
+        __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     plugins: [
         tailwindcss(),
         react(),

@@ -7,6 +7,8 @@ const brand = {
   fontFamily: '"Acumin Pro", system-ui, Avenir, Helvetica, Arial, sans-serif',
   fontUrl: "/fonts/acumin-pro.css",
 
+  supportEmail: "duncanjohnson99@gmail.com",
+
   colors: {
     primary: "#CFB991",
     primaryText: "#000000",

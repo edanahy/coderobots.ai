@@ -24,7 +24,9 @@ file in `src/config/instances/<id>.js`, selected at build time via the
 `VITE_INSTANCE` env var (default `purdue`) through `src/config/instance.js`.
 An instance config declares:
 
-- `brand` — name/logo/colors applied by `src/config/applyBrand.js`
+- `brand` — name/logo/colors/support email applied by
+  `src/config/applyBrand.js` (name also sets the document title); the
+  bug-report address shown in the About dialog is `brand.supportEmail`
 - `telemetry` — `true`: Supabase persistence + required auth; `false`:
   localStorage persistence, fully anonymous, no budget UI
 - `auth.google` — (telemetry instances only) `true` shows "Continue with
