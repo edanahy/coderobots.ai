@@ -597,3 +597,57 @@ needed for three links.
 does this want to scale to enough admin surfaces that a real hub page (with
 its own descriptions/cards, not just links) earns its keep, or do three
 plain links suffice indefinitely?
+
+---
+
+## R14 — Surface `coding_level` and `ai_model` in the session replay viewer
+
+**Status:** idea
+
+**Problem:** found while checking whether the Coding Level feature
+(`beginner`/`intermediate`/`experienced`) was actually logged anywhere
+beyond the system prompt (2026-09-22). Both `coding_level` and `ai_model`
+are real columns on every `messages` row, and both flow correctly all the
+way into the replay pipeline's data — `scripts/merge_sessions_to_csv.py`
+writes them as the `LLM Coding Level` / `AI Model` CSV columns, and
+`formats/canonical.js` / `formats/currentFormat.js` /
+`formats/legacyFormat.js` / `replayModel.js` all parse them into every
+message's `codingLevel` / `aiModel` fields. But `ReplayChatPane.jsx` (and
+`ReplayView.jsx`) never read either field — so both are computed and
+carried through the whole parsing chain and then silently dropped at the
+last step, invisible while scrubbing through a replayed session. Same root
+cause and same shape as [R12](#r12--surface-message-language-lang-in-the-session-replay-viewer)'s `lang` gap — a per-message metadata
+field that reaches the model but not the view — so worth doing together if
+either one gets picked up.
+
+**Why it matters:** an instructor scrubbing through a replayed session
+today can only recover which coding level or model was active for a given
+reply by cross-referencing the `/data` export or the `/users` per-student
+feed (both of which do show it) — replay itself has no indication, even
+though the level plausibly changed mid-conversation (that's the whole point
+of it being a per-message field, not a per-session one) and the model can
+vary turn-to-turn if the student switched it. Matters more now that
+`codingLevels.js` was just reworked into three more sharply differentiated
+tiers — being able to see *which* tier produced a given reply while
+reviewing a session is exactly the kind of thing worth eyeballing.
+
+**Affected files:**
+- `src/components/replay/ReplayChatPane.jsx` — would need to actually
+  render `codingLevel`/`aiModel` somewhere per message (e.g. a small tag
+  next to the author label, similar to how `/users`' `AdminUserDetail.jsx`
+  shows them today)
+- No parsing-chain changes needed — `canonical.js`, `currentFormat.js`,
+  `legacyFormat.js`, and `replayModel.js` already carry both fields; this is
+  purely a rendering gap in the last step
+
+**Possible approach:** mirror `AdminUserDetail.jsx`'s existing treatment
+(`admin-users-feed-detail` tag) rather than inventing a new presentation —
+a small, unobtrusive label next to the message author, blank/absent for
+older exports that never had one (legacy schema v0 has no `ai_model` column
+at all, so `aiModel` will always be blank there, same as it already is
+today for the other consumers of that format).
+
+**Open questions:** worth bundling with R12's `lang` work as one "surface
+the per-message metadata replay already parses but doesn't show" pass,
+since all three (`lang`, `coding_level`, `ai_model`) land in the same file
+and same rendering gap?
