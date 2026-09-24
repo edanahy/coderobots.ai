@@ -766,6 +766,10 @@ as $$
   select coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '') = 'admin';
 $$;
 
+-- Only signed-in users (and the backend) may call it. Postgres/Supabase
+-- otherwise let every role, including the logged-out `anon` role, execute
+-- new functions by default.
+revoke execute on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated, service_role;
 ```
 
@@ -889,8 +893,12 @@ a table can't reference another table that doesn't exist yet.
 > prompt from §11.2 will likely pop up again here, once per table. Choose
 > **Run without RLS** again — but note the reason is slightly different
 > this time: RLS for these tables isn't turned on until §11.7, not later in
-> this same block. That's fine; nothing outside this setup can reach these
-> tables until the Data API grants in §11.9 anyway.
+> this same block. That's fine as long as you continue straight through
+> §11.7–§11.9 without pausing: on Supabase projects created after
+> April 28, 2026 (and on every project after October 30, 2026) new tables
+> aren't reachable through the Data API at all until §11.9's explicit
+> grants; on older projects Supabase auto-grants them, but these tables are
+> empty and the app isn't deployed yet, so there's nothing to expose.
 
 ```sql
 -- CREATE NONCIRCULAR TABLES
@@ -1158,17 +1166,14 @@ CREATE POLICY "Users can read their own profile" ON user_profiles FOR SELECT TO 
 
 CREATE POLICY "All users read access" ON ai_models FOR SELECT TO authenticated USING (true);
 
--- SELECT: a user may read only their own row
-create policy "Users read own profile" on public.user_profiles for select to authenticated using (auth.uid() = user_id);
--- INSERT: a user may insert only their own row (first-login upsert)
-create policy "Users insert own profile" on public.user_profiles for insert to authenticated with check (auth.uid() = user_id);
--- UPDATE: a user may update only their own row
+-- INSERT: a user may insert only their own row (first save of the
+-- student-group text), and the email on it must be the one on their login
+-- token — so nobody can create a profile claiming someone else's email
+-- (admin dashboards and data export identify students by this column).
+create policy "Users insert own profile" on public.user_profiles for insert to authenticated with check (auth.uid() = user_id and email is not distinct from (auth.jwt() ->> 'email'));
+-- UPDATE: a user may update only their own row. WHICH columns they may
+-- change (only `students`) is enforced by the column-level grant in §11.9.
 create policy "Users update own profile" on public.user_profiles for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
--- Restrict UPDATE to the students column only
--- (RLS controls rows; column-level access is via GRANT)
-revoke update on public.user_profiles from authenticated;
-grant update (students) on public.user_profiles to authenticated;
 
 CREATE POLICY "sessions view own" ON sessions FOR SELECT TO authenticated USING ((SELECT auth.uid()) = user_id);
 CREATE POLICY "sessions insert own" ON sessions FOR INSERT TO authenticated WITH CHECK ((SELECT auth.uid()) = user_id);
@@ -1182,7 +1187,7 @@ CREATE POLICY "code insert own" ON code FOR INSERT TO authenticated WITH CHECK (
 CREATE POLICY "code update own" ON code FOR UPDATE TO authenticated USING ((SELECT auth.uid()) = user_id) WITH CHECK ((SELECT auth.uid()) = user_id);
 
 CREATE POLICY "Users can view their own code snapshots" ON code_snapshots FOR SELECT TO authenticated USING ((SELECT auth.uid()) = user_id);
-CREATE POLICY "Users can create their own code snapshots" ON public.code_snapshots FOR INSERT WITH CHECK ((SELECT auth.uid()) = user_id);
+CREATE POLICY "Users can create their own code snapshots" ON public.code_snapshots FOR INSERT TO authenticated WITH CHECK ((SELECT auth.uid()) = user_id);
 
 CREATE POLICY "console view own" ON console FOR SELECT TO authenticated USING ((SELECT auth.uid()) = user_id);
 CREATE POLICY "console insert own" ON console FOR INSERT TO authenticated WITH CHECK ((SELECT auth.uid()) = user_id);
@@ -1214,63 +1219,135 @@ create policy "Admins can read all conversations" on public.conversations for se
 
 drop policy if exists "Admins can read all interactions" on public.interactions;
 create policy "Admins can read all interactions" on public.interactions for select to authenticated using (is_admin());
-
-grant select on public.interactions to authenticated;
 ```
+
+> Every policy above is scoped `TO authenticated` (or `service_role`), so
+> the logged-out `anon` role never matches any of them. Table-level
+> permissions (who may even attempt a select/insert/update) are all in
+> §11.9 — keep grants there, not here, so that block stays the single
+> complete list.
 
 ### 11.9 — Data API grants
 
-**What & why:** a separate, newer layer of permission on top of RLS —
-Supabase now requires an explicit `grant` before a table is reachable
-through its auto-generated REST API at all, regardless of what RLS policies
-say. Without this block, every query from the browser would be rejected
-before RLS policies are even considered. The last two lines grant access to
-the auto-incrementing id sequences, which inserts need in order to generate
-new row ids.
+**What & why:** a separate layer of permission underneath RLS. A `grant`
+decides whether a role may *attempt* a kind of operation on a table at all
+(select/insert/update/delete); RLS then decides *which rows* it applies to.
+Both have to say yes. Three roles matter:
+
+- `anon` — anyone holding the public (Publishable) key who is **not** signed
+  in. This app never needs it: every table requires a login. It gets
+  **nothing**.
+- `authenticated` — a signed-in student or admin in the browser. Gets only
+  the specific operations the app actually performs on each table (e.g. chat
+  messages can be added but never edited or deleted; the only profile column
+  a user can change is `students`).
+- `service_role` — the backend (Modal functions and scripts using the Secret
+  key). Bypasses RLS, but still needs grants. Gets full read/write.
+
+Supabase used to auto-grant *everything* to all three roles on every new
+table, leaving RLS as the only protection. For Supabase projects created
+after April 28, 2026 — and for **all** projects from **October 30, 2026** —
+new tables *and their id sequences* get no grants at all until you add them
+explicitly, and the Data API answers "permission denied" until you do.
+
+This block is written to be **safe to re-run at any time** and to produce
+the same end state whether your project is old or new: it first revokes
+every existing grant on the app's tables (including anything Supabase
+auto-granted), then grants back exactly the minimum. The final two
+statements opt this project into the new "no automatic grants" behavior now,
+so any table someone adds later stays locked until it's deliberately
+granted here.
+
+> **Supabase popup:** this block will likely trigger the "destructive
+> operations" warning because of the `revoke` statements. No data or tables
+> are touched — it only resets permissions, and the grants that follow
+> restore everything the app needs. Safe to proceed.
 
 ```sql
 -- =========================================================
--- DATA API GRANTS
+-- DATA API GRANTS (least privilege; safe to re-run)
 -- Required for supabase-js / PostgREST / GraphQL access.
 -- =========================================================
 
-grant select on public.app_config to authenticated;
-grant select, insert, update, delete on public.app_config to service_role;
+-- 1. Clean slate: remove every existing grant on the app's tables
+--    (revoking table-level privileges also clears column-level ones).
+revoke all on table
+  public.app_config, public.user_profiles, public.ai_models, public.ai_usage,
+  public.sessions, public.code, public.code_snapshots, public.console,
+  public.conversations, public.interactions, public.messages
+from anon, authenticated, service_role;
 
-grant select, insert, update on public.user_profiles to authenticated;
-grant select, insert, update, delete on public.user_profiles to service_role;
+revoke all on all sequences in schema public from anon, authenticated, service_role;
 
-grant select on public.ai_models to authenticated;
-grant select, insert, update, delete on public.ai_models to service_role;
+-- 2. Signed-in users: only what the app does from the browser.
+--    Deletes aren't done from the browser at all.
 
-grant select, insert on public.ai_usage to authenticated;
-grant select, insert, update, delete on public.ai_usage to service_role;
+grant select on public.app_config to authenticated;         -- budgets, LilyBot catalog
+grant select on public.ai_models  to authenticated;         -- model picker
+grant select on public.ai_usage   to authenticated;         -- own usage ring (backend writes it)
 
-grant select, insert, update, delete on public.sessions to authenticated;
-grant select, insert, update, delete on public.sessions to service_role;
+grant select, insert on public.user_profiles to authenticated;
+grant update (students) on public.user_profiles to authenticated;  -- the only editable column
 
-grant select, insert, update, delete on public.code to authenticated;
-grant select, insert, update, delete on public.code to service_role;
+grant select, insert, update on public.sessions      to authenticated;
+grant select, insert, update on public.code          to authenticated;
+grant select, insert, update on public.conversations to authenticated;
 
+-- Append-only logs: can be added to, never edited.
 grant select, insert on public.code_snapshots to authenticated;
-grant select, insert, update, delete on public.code_snapshots to service_role;
+grant select, insert on public.console        to authenticated;
+grant select, insert on public.interactions   to authenticated;
+grant select, insert on public.messages       to authenticated;
 
-grant select, insert on public.console to authenticated;
-grant select, insert, update, delete on public.console to service_role;
+-- 3. Backend (Secret key): full read/write on every app table.
+grant select, insert, update, delete on table
+  public.app_config, public.user_profiles, public.ai_models, public.ai_usage,
+  public.sessions, public.code, public.code_snapshots, public.console,
+  public.conversations, public.interactions, public.messages
+to service_role;
 
-grant select, insert, update, delete on public.conversations to authenticated;
-grant select, insert, update, delete on public.conversations to service_role;
+-- 4. Id sequences — needed so inserts can generate the bigint `id`.
+--    (Supabase stops auto-granting these on October 30 too.)
+grant usage, select on all sequences in schema public to authenticated, service_role;
 
-grant insert on public.interactions to authenticated;
-grant select, insert, update, delete on public.interactions to service_role;
-
-grant select, insert on public.messages to authenticated;
-grant select, insert, update, delete on public.messages to service_role;
-
--- Required so authenticated inserts can generate the bigint id.
-grant usage, select on all sequences in schema public to authenticated;
-grant usage, select on all sequences in schema public to service_role;
+-- 5. Stop auto-exposing FUTURE tables/sequences created from the SQL editor
+--    (Supabase's recommended opt-in; matches its post-Oct-30 default).
+--    Any table added later must get its own grants in this block.
+alter default privileges for role postgres in schema public
+  revoke all on tables from anon, authenticated, service_role;
+alter default privileges for role postgres in schema public
+  revoke all on sequences from anon, authenticated, service_role;
 ```
+
+> **Adding a new table later?** In the same SQL (or migration) that creates
+> it: enable RLS, add `TO authenticated` policies, then add it to steps 1–3
+> above with only the operations the app needs, and add it to the
+> `expected_tables` list in §11.11. If it has a `generated ... as identity`
+> id, re-run step 4. Leave `anon` out unless the table genuinely must be
+> readable without logging in.
+
+> **Already have a project provisioned from an earlier version of this
+> guide?** Earlier versions of this block re-granted full `update` on
+> `user_profiles` (letting a signed-in user change the `email` on their own
+> profile row), and left Supabase's auto-grants to `anon` in place. To bring
+> an existing project up to date, run these once, in order — all are safe
+> to re-run and none touch your data:
+>
+> 1. The two `revoke`/`grant execute` lines at the end of §11.1.
+> 2. The policy patch below.
+> 3. This entire §11.9 block.
+> 4. The §11.11 verification query — every row should say `OK`.
+>
+> ```sql
+> -- Tighten profile inserts to the user's own login email; drop the
+> -- duplicate select policy; scope snapshot inserts to signed-in users.
+> drop policy if exists "Users insert own profile" on public.user_profiles;
+> create policy "Users insert own profile" on public.user_profiles for insert to authenticated with check (auth.uid() = user_id and email is not distinct from (auth.jwt() ->> 'email'));
+> drop policy if exists "Users read own profile" on public.user_profiles;
+>
+> drop policy if exists "Users can create their own code snapshots" on public.code_snapshots;
+> create policy "Users can create their own code snapshots" on public.code_snapshots for insert to authenticated with check ((select auth.uid()) = user_id);
+> ```
 
 ### 11.10 — Shift to cascade delete
 
@@ -1469,6 +1546,82 @@ grant_check as (
          ''::text as detail
   from expected_tables et
 ),
+service_grant_check as (
+  select 'service_role can read/write: ' || et.name as check_name,
+         case when has_table_privilege('service_role', 'public.' || et.name, 'select')
+               and has_table_privilege('service_role', 'public.' || et.name, 'insert')
+               and has_table_privilege('service_role', 'public.' || et.name, 'update')
+               and has_table_privilege('service_role', 'public.' || et.name, 'delete')
+           then 'OK' else 'MISSING (§11.9)' end as status,
+         ''::text as detail
+  from expected_tables et
+),
+anon_check as (
+  select 'anon has no access: ' || et.name as check_name,
+         case when has_table_privilege('anon', 'public.' || et.name,
+                'select, insert, update, delete, truncate, references, trigger')
+           then 'TOO OPEN (re-run §11.9)' else 'OK' end as status,
+         ''::text as detail
+  from expected_tables et
+),
+no_browser_delete_check as (
+  select 'authenticated cannot delete/truncate: ' || et.name as check_name,
+         case when has_table_privilege('authenticated', 'public.' || et.name, 'delete, truncate')
+           then 'TOO OPEN (re-run §11.9)' else 'OK' end as status,
+         ''::text as detail
+  from expected_tables et
+),
+profile_column_check as (
+  select 'user_profiles: only students is user-editable' as check_name,
+         case when has_column_privilege('authenticated', 'public.user_profiles', 'students', 'update')
+               and not has_column_privilege('authenticated', 'public.user_profiles', 'email', 'update')
+               and not has_column_privilege('authenticated', 'public.user_profiles', 'user_id', 'update')
+           then 'OK' else 'TOO OPEN (re-run §11.9)' end as status,
+         ''::text as detail
+),
+profile_email_check as (
+  select 'user_profiles emails match login emails' as check_name,
+         case when count(*) = 0 then 'OK' else 'REVIEW (see note below)' end as status,
+         count(*)::text || ' mismatched row(s)' as detail
+  from public.user_profiles p
+  join auth.users u on u.id = p.user_id
+  where p.email is distinct from u.email
+),
+sequence_check as (
+  select 'authenticated can use sequence: ' || s.sequencename as check_name,
+         case when has_sequence_privilege('authenticated', format('%I.%I', s.schemaname, s.sequencename), 'usage')
+           then 'OK' else 'MISSING (§11.9 step 4)' end as status,
+         ''::text as detail
+  from pg_sequences s
+  where s.schemaname = 'public'
+),
+anon_function_check as (
+  select 'anon cannot call is_admin()' as check_name,
+         case when has_function_privilege('anon', 'public.is_admin()', 'execute')
+           then 'TOO OPEN (re-run §11.1)' else 'OK' end as status,
+         ''::text as detail
+),
+public_policy_check as (
+  select 'no policy applies to all roles' as check_name,
+         case when count(*) = 0 then 'OK' else 'TOO OPEN (§11.8 patch in §11.9)' end as status,
+         coalesce(string_agg(tablename || ': ' || policyname, '; '), '') as detail
+  from pg_policies
+  where schemaname = 'public' and 'public' = any(roles)
+),
+default_privs_check as (
+  select 'new tables not auto-exposed' as check_name,
+         case when exists (
+           select 1
+           from pg_default_acl d
+           join pg_namespace n on n.oid = d.defaclnamespace
+           cross join lateral aclexplode(d.defaclacl) a
+           where n.nspname = 'public'
+             and d.defaclrole = 'postgres'::regrole::oid
+             and d.defaclobjtype in ('r', 'S')
+             and a.grantee in ('anon'::regrole::oid, 'authenticated'::regrole::oid, 'service_role'::regrole::oid)
+         ) then 'TOO OPEN (re-run §11.9 step 5)' else 'OK' end as status,
+         ''::text as detail
+),
 cascade_check as (
   select 'cascade delete applied' as check_name,
          case when confdeltype = 'c' then 'OK' else 'MISSING (§11.10)' end as status,
@@ -1481,17 +1634,28 @@ context_fk_check as (
          ''::text as detail
   from pg_constraint where conname = 'messages_code_context_id_fkey'
 )
-select * from table_check
-union all select * from function_check
-union all select * from config_check
-union all select * from model_check
-union all select * from rls_check
-union all select * from circular_fk_check
-union all select * from policy_check
-union all select * from grant_check
-union all select * from cascade_check
-union all select * from context_fk_check
-order by status, check_name;
+select * from (
+  select * from table_check
+  union all select * from function_check
+  union all select * from config_check
+  union all select * from model_check
+  union all select * from rls_check
+  union all select * from circular_fk_check
+  union all select * from policy_check
+  union all select * from grant_check
+  union all select * from service_grant_check
+  union all select * from anon_check
+  union all select * from no_browser_delete_check
+  union all select * from profile_column_check
+  union all select * from profile_email_check
+  union all select * from sequence_check
+  union all select * from anon_function_check
+  union all select * from public_policy_check
+  union all select * from default_privs_check
+  union all select * from cascade_check
+  union all select * from context_fk_check
+) as results
+order by (status = 'OK'), check_name;  -- problems first
 ```
 
 **Reading the results:** every row's `status` should say `OK`. Any other
@@ -1501,6 +1665,18 @@ skipped entirely. If you re-run a block and a check still fails with no
 obvious reason why, that's a good moment to paste the failing check name
 plus the error message into an LLM for help debugging — it can usually spot
 a missing dependency or a typo faster than reading the raw SQL by eye.
+
+`TOO OPEN` rows are security findings rather than setup gaps — the app
+still works, but some role has more access than it needs; re-running the
+named block fixes them. A `REVIEW` on the profile-email check means some
+`user_profiles` row's email differs from that user's actual login email —
+either someone changed their login email after their profile was created,
+or (on projects set up with an earlier version of this guide) a profile row
+was edited to claim a different address. This one isn't auto-fixed; list
+the rows with
+`select p.user_id, p.email as profile_email, u.email as login_email from public.user_profiles p join auth.users u on u.id = p.user_id where p.email is distinct from u.email;`
+and, once you've looked, correct them with
+`update public.user_profiles p set email = u.email from auth.users u where u.id = p.user_id and p.email is distinct from u.email;`.
 
 This only checks *existence*, not correctness of values (e.g. it confirms
 `CAMPS_DAILY_BUDGET` exists, not that `1.0` is the value you actually

@@ -651,3 +651,79 @@ today for the other consumers of that format).
 the per-message metadata replay already parses but doesn't show" pass,
 since all three (`lang`, `coding_level`, `ai_model`) land in the same file
 and same rendering gap?
+
+---
+
+## R15 — Move the budget tier (`access_level`) out of user-editable metadata
+
+**Status:** idea — **security issue, higher priority than most entries here**
+
+**Problem:** found while hardening the Supabase grants in INSTALL.md §11
+(2026-09-24). A user's AI-budget tier (`standard` / `camps`) is stored in
+`user_metadata.access_level`. In Supabase, `user_metadata` can be edited by
+the signed-in user themselves — `supabase.auth.updateUser({ data: {...} })`
+is the same call the app already uses to write it
+(`ensureAccessLevel` in `src/services/auth.js`). The Modal budget check
+(`verify_auth_and_get_access_level` in `modal_functions/budget_manager.py`)
+reads that value and trusts it. So any student can open the browser console
+and run
+`supabase.auth.updateUser({ data: { access_level: 'camps' } })` to give
+themselves the `camps` tier.
+
+It's worse than just a bigger cap: in `check_budget`, `camps` users skip the
+spend check **entirely** for any model with `ai_models.unlimited = true`
+(the default rows in INSTALL.md §11.6 mark both default models unlimited).
+So self-promoting to `camps` means **uncapped AI spend** on those models,
+billed to the deployment's provider keys.
+
+Admin status is *not* affected — it already lives in `app_metadata.role`,
+which only the backend/SQL editor can change (INSTALL.md §8).
+
+**Why it matters:** this is a small, unmonitored research deployment; a
+curious student finding this could run up real provider costs before anyone
+notices. No other part of the budget system protects against it.
+
+**Affected files:**
+- `src/services/auth.js` — `signUpWithPassword` (writes `access_level` into
+  `options.data` = user_metadata at signup), `ensureAccessLevel` (backfills
+  it client-side via `updateUser`), `getAccessLevelFromEmail` /
+  `CAMPS_EMAIL_DOMAINS` (the email-domain → tier rule, currently client-side)
+- `src/services/persistence/supabaseAdapter/usage.js` — reads
+  `user_metadata.access_level` for the usage-ring budget display
+- `src/contexts/AuthContext.jsx` — anonymous stub user carries
+  `user_metadata.access_level: 'anonymous'` (localAdapter path only;
+  harmless, but should move alongside for consistency)
+- `modal_functions/budget_manager.py` — `verify_auth_and_get_access_level`
+  (the check that actually has to change), also used by
+  `chat_with_budget.py` and `tutor_pipeline.py`
+- `scripts/bulk_create_camp_users.sh` — creates accounts with
+  `user_metadata: {access_level: "camps"}`
+- INSTALL.md §8/§10 — docs describing where the tier lives
+
+**Possible approach:**
+- Store the tier in `app_metadata.access_level` (server-only, like
+  `app_metadata.role`). Have `budget_manager.py` read **only**
+  `app_metadata`, defaulting to `standard` when absent — never
+  `user_metadata`.
+- Tier assignment can no longer happen in the browser. Options: (a) the
+  Modal budget endpoint assigns it on first request using the email-domain
+  rule and the service key; (b) a Postgres trigger on `auth.users` insert
+  sets `raw_app_meta_data` from the email domain; (c) admins set it by SQL,
+  as with the admin role. The bulk-create script switches to
+  `app_metadata` (the admin API accepts it with the Secret key).
+- One-time migration for existing accounts: copy the *legitimate* value
+  into `app_metadata` — i.e. recompute it from the email-domain rule / known
+  bulk-created accounts rather than copying `user_metadata` blindly, since
+  any current value might already have been tampered with. Worth checking
+  first whether anyone's `user_metadata.access_level` disagrees with what
+  their email implies:
+  `select id, email, raw_user_meta_data->>'access_level' from auth.users;`
+- Remove `ensureAccessLevel`'s client-side `updateUser` write.
+
+**Open questions:** overlaps heavily with
+[R2](#r2--rethink-camps-as-one-specific-outreach-model) and
+[R5](#r5--a-richer-multi-tier-budget-model) (tier model redesign) — do the
+security fix on its own first (small, urgent), or fold it into that
+redesign? Which assignment option (a/b/c) fits best? Should `camps` +
+`unlimited` really mean *no* cap at all, or should there always be some
+hard daily ceiling as a backstop?
