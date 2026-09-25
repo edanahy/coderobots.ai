@@ -83,6 +83,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     switchCode,
     createNewCode,
     updateCodeName,
+    closeCode,
     updateCurrentCodeContent,
     createSnapshot
   } = useSession();
@@ -1325,6 +1326,7 @@ os.chdir('/flash')
         onSwitchCode={switchCode}
         onCreateCode={createNewCode}
         onRenameCode={updateCodeName}
+        onCloseCode={closeCode}
       />
       <div className="parent" ref={containerRef}>
         <div className="child top-child">

@@ -56,6 +56,7 @@ const CODE_COLUMNS = [
   { key: 'content', label: 'Content', default: true },
   { key: 'save_source', label: 'Save Source', default: true },
   { key: 'timestamp', label: 'Timestamp', default: true },
+  { key: 'deleted_at', label: 'Closed At', default: true },
 ];
 
 const CODE_SNAPSHOT_COLUMNS = [
@@ -83,6 +84,7 @@ const CONVERSATION_COLUMNS = [
   { key: 'start_time', label: 'Start Time', default: true },
   { key: 'last_updated', label: 'Last Updated', default: true },
   { key: 'name', label: 'Name', default: true },
+  { key: 'deleted_at', label: 'Closed At', default: true },
 ];
 
 const USER_PROFILE_COLUMNS = [

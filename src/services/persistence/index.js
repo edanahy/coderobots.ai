@@ -16,9 +16,10 @@
  *
  * - sessions: getUserSessions, createNewSession, updateSessionCode,
  *   updateSessionConsole, updateSessionName, getSessionConversations,
- *   createConversation, updateConversationName, updateSessionConversation,
- *   getSessionCode, createCode, updateCodeName, updateCodeContent,
- *   createCodeSnapshot, getCodeSnapshots, setSessionHardwarePlatform
+ *   createConversation, updateConversationName, closeConversation,
+ *   updateSessionConversation, getSessionCode, createCode, updateCodeName,
+ *   closeCode, updateCodeContent, createCodeSnapshot, getCodeSnapshots,
+ *   setSessionHardwarePlatform
  * - logging: logMessage, logInteraction, logConsole, getConversationHistory,
  *   getLatestCode, getLatestConsole, updateSessionOnLoad
  * - usage: getDailySpend, getDailyBudgetLimit, getDailyBudgetUsage,
@@ -30,6 +31,10 @@
  * Rows must include the fields SessionContext consumes raw: `id`,
  * `created_at`/`start_time`, `hardware_platform`, `current_conversation_id`,
  * `current_code_id`, `current_console_id`, `name`, `content`, ...
+ *
+ * Closing a tab is a soft delete (closeConversation/closeCode stamp
+ * `deleted_at`). getSessionConversations/getSessionCode return closed rows
+ * too — SessionContext hides them — so reads never depend on the column.
  *
  * Note: adminUsage.js and dataExport.js intentionally bypass this seam and
  * import supabase directly — they back admin-only routes that are disabled

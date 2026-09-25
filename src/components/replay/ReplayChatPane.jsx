@@ -151,6 +151,8 @@ const ReplayChatPane = ({ frame, profile }) => {
           onSwitchConversation={noop}
           onCreateConversation={noop}
           onRenameConversation={noop}
+          onCloseConversation={noop}
+          readOnly
         />
       )}
       {showChatTabs && frame?.chatTabSwitched && (

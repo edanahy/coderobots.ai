@@ -70,6 +70,7 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     switchConversation,
     createNewConversation,
     updateConversationName,
+    closeConversation,
     createSnapshot,
     activePlatform,
   } = useSession();
@@ -889,6 +890,7 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
           onSwitchConversation={switchConversation}
           onCreateConversation={createNewConversation}
           onRenameConversation={updateConversationName}
+          onCloseConversation={closeConversation}
         />
       )}
 

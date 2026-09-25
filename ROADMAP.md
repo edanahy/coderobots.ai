@@ -727,3 +727,81 @@ security fix on its own first (small, urgent), or fold it into that
 redesign? Which assignment option (a/b/c) fits best? Should `camps` +
 `unlimited` really mean *no* cap at all, or should there always be some
 hard daily ceiling as a backstop?
+
+---
+
+## R16 — Let students reopen closed tabs
+
+**Status:** idea
+
+**Problem:** closing a code or chat tab (added 2026-09-25) is a soft delete —
+`code.deleted_at` / `conversations.deleted_at` get stamped and the tab is
+hidden — but there's no way back in the app. A student who closes the wrong
+tab (the hover "×" makes that easy, even with the confirm dialog) can only
+get it back by asking an admin to null out `deleted_at` in the Supabase SQL
+editor. On local-storage instances there's no admin path at all short of
+editing `coderobots_local_db_v1` by hand.
+
+**Why it matters:** code tabs hold student work; losing one to a misclick is
+the kind of thing that makes students distrust the tool. The data is all
+still there, so this is purely a UI gap.
+
+**Affected files:**
+- `src/contexts/SessionContext.jsx` — already keeps closed rows in state
+  (`conversations`/`codeRecords` hold everything; only `openConversations`/
+  `openCodeRecords` are exposed), so a "closed tabs" list is cheap to expose
+- both persistence adapters — a `reopenConversation`/`reopenCode` that sets
+  `deleted_at` back to `null` (the `update` grants already allow it)
+- `ChatTabs.jsx` / `CodeTabs.jsx` — somewhere to surface it
+- `DATA_COLLECTION.md` — a `reopen_*` interaction, and a note that
+  `deleted_at` can be cleared (so it's "last closed", not "closed forever")
+
+**Possible approach:** an undo toast for a few seconds after closing (least
+UI, covers the misclick case), and/or a "Recently closed" dropdown next to
+the `+` button (browser-style "reopen closed tab"). If this lands, the
+confirm dialog on close could probably go away.
+
+**Open questions:** undo toast, dropdown, or both? Should reopening restore
+the tab's original position (sort is by creation time, so it would), or put
+it at the end? Does research want to preserve the close→reopen history, in
+which case `deleted_at` alone isn't enough and it'd need the interactions
+log (or a separate closed/reopened event table)?
+
+---
+
+## R17 — Show tab closes in the session replay viewer
+
+**Status:** idea
+
+**Problem:** the replay viewer (`/view-data`) rebuilds tabs from the merged
+per-session CSV by tab *name* (`replayModel.js` `buildFrames`; canonical
+events carry no tab IDs). Closed tabs (2026-09-25) therefore stay in the
+replayed tab bar forever — the `close_code_tab` / `close_conversation`
+interaction rows appear as events, but they don't say *which* tab was closed
+(`interactions` has only `session_id` + `button_name`), so the replay can't
+remove it.
+
+**Why it matters:** a researcher watching a replay sees tabs the student
+could no longer see at that point, which misrepresents what their screen
+looked like (e.g. "why didn't they use the code in Code tab 2?" — because
+they'd closed it).
+
+**Affected files:**
+- `scripts/merge_sessions_to_csv.py` — could emit a synthetic "tab closed"
+  event per closed row using `code.deleted_at` / `conversations.deleted_at`
+  (both now in the `/data` export as "Closed At") and the row's name
+- `src/components/replay/formats/*` + `canonical.js` — a new event type
+- `src/components/replay/replayModel.js` — drop the tab from the frame's
+  tab list from that event onward
+- `ChatTabs` / `CodeTabs` already have a `readOnly` mode for replay
+
+**Possible approach:** the merge script route needs no DB or app change —
+`deleted_at` + `name` are enough to place a close event on the timeline.
+Tab names are unique among a session's default-named tabs (new `Chat N` /
+`Code tab N` names count closed tabs), but students can still rename two
+tabs to the same name, which name-keyed replay can't tell apart.
+
+**Open questions:** if R16 (reopen) lands, `deleted_at` only holds the
+*latest* close, so close/reopen/close sequences would need the interactions
+log to carry the tab id — worth adding a tab id to `interactions` then?
+Relatedly, see R12/R14 for other fields the replay viewer drops today.

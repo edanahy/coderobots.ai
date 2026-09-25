@@ -131,8 +131,9 @@ One row per chat tab inside a session.
 | `name` | text | Defaults to `Unnamed Chat`; user-editable |
 | `start_time` | timestamptz | Set on insert |
 | `last_updated` | timestamptz | Bumped on each new message |
+| `deleted_at` | timestamptz, nullable | Set when the student closes the chat tab; `null` = still open. Soft delete — the row and all its `messages` are kept, the tab is only hidden from the UI. Exported as "Closed At" |
 
-**Write path:** `sessionManager.createConversation`. The first conversation (`Chat 1`) is created alongside the session.
+**Write path:** `sessionManager.createConversation`. The first conversation (`Chat 1`) is created alongside the session. Closing a tab (`sessionManager.closeConversation`) only stamps `deleted_at`; students have no delete grant, so rows are never removed from the browser. The last open tab can't be closed, and new default names (`Chat N`) count closed tabs too, so a new tab never reuses a closed tab's name (the replay viewer and `merge_sessions_to_csv.py` identify tabs by name).
 
 ---
 
@@ -179,6 +180,7 @@ The live, in-place contents of each code tab. **Not** an append-only log — row
 | `content` | text | Current code contents |
 | `save_source` | text | Most recent reason the row was written/updated (see `code_snapshots` below for the full value list — the same values apply here) |
 | `timestamp` | timestamptz | Set once at row creation — **not** bumped by later live-edit autosaves, so don't read this as "last edited"; `code_snapshots.timestamp` for the same `code_id` is the accurate edit-history timeline |
+| `deleted_at` | timestamptz, nullable | Set when the student closes the code tab; `null` = still open. Soft delete, same rules as `conversations.deleted_at` (row + snapshots kept, last tab can't be closed, `Code tab N` names count closed tabs). Closing the active tab saves any pending autosave first. Exported as "Closed At" |
 
 This table tracks current state rather than history; it **is** included in the data export as `Code` so you can pull the latest contents of each tab. `code_snapshots` remains the append-only auditable record of every change.
 
@@ -299,9 +301,11 @@ Centralized here rather than in each UI component (`TitleBar`/`CodeTabs`/`ChatTa
 | `switch_conversation` | Switched chat tabs |
 | `create_conversation` | New chat tab created |
 | `rename_conversation` | Chat tab renamed |
+| `close_conversation` | Chat tab closed (soft delete — see `conversations.deleted_at`). Closing the *active* tab logs a `switch_conversation` to its neighbour first |
 | `switch_code_tab` | Switched code tabs |
 | `create_code_tab` | New code tab created |
 | `rename_code_tab` | Code tab renamed |
+| `close_code_tab` | Code tab closed (soft delete — see `code.deleted_at`). Closing the *active* tab logs a `switch_code_tab` to its neighbour first |
 
 ### `button_name` values — chat (`ChatPanel`) and save (`App.jsx`)
 

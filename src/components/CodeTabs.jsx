@@ -1,6 +1,8 @@
 /**
  * Code Tabs Component
- * Displays a horizontal scrollable list of code tabs for code file management
+ * Displays a horizontal scrollable list of code tabs for code file management.
+ * Click an inactive tab to switch to it; click the active tab to rename it.
+ * The hover "×" closes a tab (disabled on the last one).
  */
 
 import { useState, useRef } from 'react';
@@ -13,20 +15,26 @@ const CodeTabs = ({
   onSwitchCode,
   onCreateCode,
   onRenameCode,
+  onCloseCode,
+  readOnly = false,
 }) => {
   const { t } = useLanguage();
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const tabsContainerRef = useRef(null);
+  const canClose = codeRecords.length > 1;
 
   const handleStartEdit = (codeRecord, index) => {
     setEditingId(codeRecord.id);
     setEditingName(codeRecord.name || `Code tab ${index + 1}`);
   };
 
-  const handleSaveEdit = async (codeId) => {
-    if (editingName.trim()) {
-      await onRenameCode(codeId, editingName.trim());
+  const handleSaveEdit = async (codeId, previousName) => {
+    const newName = editingName.trim();
+    // Skip no-op saves: clicking the active tab and clicking away shouldn't
+    // log a rename.
+    if (newName && newName !== previousName) {
+      await onRenameCode(codeId, newName);
     }
     setEditingId(null);
     setEditingName('');
@@ -37,12 +45,29 @@ const CodeTabs = ({
     setEditingName('');
   };
 
-  const handleKeyDown = (e, codeId) => {
+  const handleKeyDown = (e, codeId, previousName) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleSaveEdit(codeId);
+      handleSaveEdit(codeId, previousName);
     } else if (e.key === 'Escape') {
       handleCancelEdit();
+    }
+  };
+
+  const handleTabClick = (codeRecord, index, isActive) => {
+    if (readOnly || editingId === codeRecord.id) return;
+    if (isActive) {
+      handleStartEdit(codeRecord, index);
+    } else {
+      onSwitchCode(codeRecord.id);
+    }
+  };
+
+  const handleClose = (e, codeRecord, displayName) => {
+    e.stopPropagation();
+    if (!canClose) return;
+    if (window.confirm(t('closeTabConfirm').replace('{name}', displayName))) {
+      onCloseCode(codeRecord.id);
     }
   };
 
@@ -68,8 +93,9 @@ const CodeTabs = ({
           return (
             <div
               key={codeRecord.id}
-              className={`code-tab ${isActive ? 'active' : ''}`}
-              onClick={() => !isEditing && onSwitchCode(codeRecord.id)}
+              className={`code-tab ${isActive ? 'active' : ''} ${readOnly ? 'read-only' : ''}`}
+              onClick={() => handleTabClick(codeRecord, index, isActive)}
+              title={isEditing ? undefined : displayName}
             >
               {isEditing ? (
                 <input
@@ -77,8 +103,9 @@ const CodeTabs = ({
                   className="code-tab-input"
                   value={editingName}
                   onChange={(e) => setEditingName(e.target.value)}
-                  onBlur={() => handleSaveEdit(codeRecord.id)}
-                  onKeyDown={(e) => handleKeyDown(e, codeRecord.id)}
+                  onBlur={() => handleSaveEdit(codeRecord.id, displayName)}
+                  onKeyDown={(e) => handleKeyDown(e, codeRecord.id, displayName)}
+                  aria-label={t('renameTab')}
                   autoFocus
                   onClick={(e) => e.stopPropagation()}
                 />
@@ -87,25 +114,31 @@ const CodeTabs = ({
                   <span className="code-tab-name">
                     {displayName}
                   </span>
-                  <button
-                    type="button"
-                    className="code-tab-edit"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStartEdit(codeRecord, index);
-                    }}
-                    aria-label={t('renameTab')}
-                  >
-                    &#9998;
-                  </button>
+                  {!readOnly && (
+                    // aria-disabled rather than disabled: a disabled button
+                    // may not show its tooltip or stop the click reaching the
+                    // tab (which would start a rename).
+                    <button
+                      type="button"
+                      className={`code-tab-close ${canClose ? '' : 'disabled'}`}
+                      onClick={(e) => handleClose(e, codeRecord, displayName)}
+                      aria-disabled={!canClose}
+                      aria-label={canClose ? t('closeTab') : t('cannotCloseLastTab')}
+                      title={canClose ? t('closeTab') : t('cannotCloseLastTab')}
+                    >
+                      &times;
+                    </button>
+                  )}
                 </>
               )}
             </div>
           );
         })}
-        <button className="code-tab-add" onClick={onCreateCode} aria-label={t('addNewCode')}>
-          +
-        </button>
+        {!readOnly && (
+          <button className="code-tab-add" onClick={onCreateCode} aria-label={t('addNewCode')}>
+            +
+          </button>
+        )}
       </div>
     </div>
   );

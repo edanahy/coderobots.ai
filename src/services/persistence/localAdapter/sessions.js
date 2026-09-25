@@ -125,6 +125,15 @@ export const updateConversationName = async (conversationId, name) => {
   });
 };
 
+// Soft delete: the row stays (hidden from the tab bar), matching Supabase.
+export const closeConversation = async (conversationId) => {
+  if (!conversationId) {
+    console.error('conversation_id is required');
+    return null;
+  }
+  return updateRow('conversations', conversationId, { deleted_at: nowIso() });
+};
+
 export const updateSessionConversation = async (sessionId, conversationId) => {
   if (!sessionId || !conversationId) {
     console.error('session_id and conversation_id are required');
@@ -164,6 +173,15 @@ export const updateCodeName = async (codeId, name) => {
     return null;
   }
   return updateRow('code', codeId, { name: name || 'Code Tab' });
+};
+
+// Soft delete: the row stays (hidden from the tab bar), matching Supabase.
+export const closeCode = async (codeId) => {
+  if (!codeId) {
+    console.error('code_id is required');
+    return null;
+  }
+  return updateRow('code', codeId, { deleted_at: nowIso() });
 };
 
 export const updateCodeContent = async (codeId, content) => {

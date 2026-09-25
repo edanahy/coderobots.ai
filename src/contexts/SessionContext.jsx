@@ -3,7 +3,7 @@
  * Manages active session state and provides session switching logic
  */
 
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   getUserSessions,
   createNewSession,
@@ -11,10 +11,12 @@ import {
   getSessionConversations,
   createConversation,
   updateConversationName as updateConversationNameService,
+  closeConversation as closeConversationService,
   updateSessionConversation,
   getSessionCode,
   createCode,
   updateCodeName as updateCodeNameService,
+  closeCode as closeCodeService,
   updateCodeContent as updateCodeContentService,
   updateSessionCode as updateSessionCodeService,
   createCodeSnapshot,
@@ -39,9 +41,22 @@ const AVAILABLE_PLATFORMS = instance.platforms
   .map((id) => getPlatform(id))
   .filter(Boolean);
 
+// Closed tabs are soft-deleted (deleted_at set) and hidden from the UI.
+const openOnly = (rows) => rows.filter((row) => !row.deleted_at);
+
+// The id to activate for a session: its stored pointer if that tab is still
+// open, otherwise the first open tab (the stored one was closed or is stale).
+const pickOpenTabId = (rows, currentId) => {
+  const open = openOnly(rows);
+  if (open.some((row) => row.id === currentId)) return currentId;
+  return open.length > 0 ? open[0].id : currentId;
+};
+
 export const SessionProvider = ({ children }) => {
   const [activeSession, setActiveSession] = useState(null);
   const [conversationHistory, setConversationHistory] = useState([]);
+  // All rows including closed tabs (new tab names count them, so a new
+  // "Chat 3" never reuses a closed tab's name); only open ones are exposed.
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [codeRecords, setCodeRecords] = useState([]);
@@ -67,6 +82,11 @@ export const SessionProvider = ({ children }) => {
   
   // Debounce timer for live code saving
   const saveDebounceTimer = useRef(null);
+  // The edit the debounce timer will save: { codeId, sessionId, content }
+  const pendingSaveRef = useRef(null);
+
+  const openConversations = useMemo(() => openOnly(conversations), [conversations]);
+  const openCodeRecords = useMemo(() => openOnly(codeRecords), [codeRecords]);
 
   /**
    * Load all user sessions from database
@@ -154,37 +174,42 @@ export const SessionProvider = ({ children }) => {
       // Update session timestamps
       await updateSessionOnLoad(sessionId);
 
-      // Load conversation history
-      if (session.current_conversation_id) {
-        const history = await getConversationHistory(session.current_conversation_id);
-        setConversationHistory(history);
-        setCurrentConversationId(session.current_conversation_id);
-      }
-
-      setActiveSession(session);
-
-      // Load all conversations for this session
-      await loadConversations(session.id);
-      
-      // Load all code records for this session
+      // Load all conversations and code records for this session
+      const sessionConversations = await loadConversations(session.id);
       const sessionCodeRecords = await loadCodeRecords(session.id);
 
-      // Set current code if available
-      if (session.current_code_id) {
-        // Use getLatestCode to load the previously selected code content directly
-        const latestCode = await getLatestCode(session.id);
-        if (latestCode !== null) {
-          setCurrentCodeId(session.current_code_id);
-          setCurrentCodeContent(latestCode);
-        } else if (sessionCodeRecords.length > 0) {
-          // current_code_id is stale or deleted — fall back to first record
-          setCurrentCodeId(sessionCodeRecords[0].id);
-          setCurrentCodeContent(sessionCodeRecords[0].content || '# Start your project here!\n');
-        }
-      } else if (sessionCodeRecords.length > 0) {
-        // Fall back to first code record if no current_code_id
-        setCurrentCodeId(sessionCodeRecords[0].id);
-        setCurrentCodeContent(sessionCodeRecords[0].content || '# Start your project here!\n');
+      // If the stored current tab was closed, repoint the session at the
+      // first open tab so it never resumes on a hidden one.
+      let loadedSession = session;
+      const conversationId = pickOpenTabId(sessionConversations, session.current_conversation_id);
+      if (conversationId !== session.current_conversation_id) {
+        loadedSession = (await updateSessionConversation(session.id, conversationId)) || loadedSession;
+      }
+      const codeId = pickOpenTabId(sessionCodeRecords, session.current_code_id);
+      if (codeId !== session.current_code_id) {
+        loadedSession = (await updateSessionCodeService(session.id, codeId)) || loadedSession;
+      }
+
+      // Load conversation history
+      if (conversationId) {
+        const history = await getConversationHistory(conversationId);
+        setConversationHistory(history);
+        setCurrentConversationId(conversationId);
+      }
+
+      setActiveSession(loadedSession);
+
+      // Set current code if available (rows were just fetched, so their
+      // content is the latest saved)
+      const openCode = openOnly(sessionCodeRecords);
+      const currentCode = openCode.find((code) => code.id === codeId);
+      if (currentCode) {
+        setCurrentCodeId(codeId);
+        setCurrentCodeContent(currentCode.content ?? '# Start your project here!\n');
+      } else if (openCode.length > 0) {
+        // Fall back to first open code record
+        setCurrentCodeId(openCode[0].id);
+        setCurrentCodeContent(openCode[0].content || '# Start your project here!\n');
       }
       
       console.log(`✅ Active session set to: ${session.id}`);
@@ -399,6 +424,40 @@ export const SessionProvider = ({ children }) => {
   }, [activeSession, loadConversations]);
 
   /**
+   * Close a conversation (chat tab). Soft delete — the row and its messages
+   * stay in the database, the tab is just hidden. The last open tab can't be
+   * closed. Closing the active tab first switches to its right-hand
+   * neighbour (or left, if it was last), so the session never points at a
+   * closed tab even if the close write then fails.
+   */
+  const closeConversation = useCallback(async (conversationId) => {
+    if (!activeSession) {
+      console.error('No active session');
+      return false;
+    }
+    if (openConversations.length <= 1) return false;
+    const index = openConversations.findIndex((c) => c.id === conversationId);
+    if (index === -1) return false;
+
+    try {
+      if (conversationId === currentConversationId) {
+        const neighbor = openConversations[index + 1] || openConversations[index - 1];
+        const switched = await switchConversation(neighbor.id);
+        if (!switched) return false;
+      }
+
+      const closed = await closeConversationService(conversationId);
+      if (!closed) return false;
+      logInteraction('close_conversation', activeSession.id);
+      await loadConversations(activeSession.id);
+      return true;
+    } catch (error) {
+      console.error('Error closing conversation:', error);
+      return false;
+    }
+  }, [activeSession, openConversations, currentConversationId, switchConversation, loadConversations]);
+
+  /**
    * Switch to a different code record within the current session
    */
   const switchCode = useCallback(async (codeId) => {
@@ -487,6 +546,40 @@ export const SessionProvider = ({ children }) => {
   }, [activeSession, loadCodeRecords]);
 
   /**
+   * Save the pending debounced edit now (if any) instead of waiting for the
+   * timer. The timer itself calls this too.
+   */
+  const savePendingCode = useCallback(async () => {
+    if (saveDebounceTimer.current) {
+      clearTimeout(saveDebounceTimer.current);
+      saveDebounceTimer.current = null;
+    }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (!pending) return;
+
+    try {
+      await updateCodeContentService(pending.codeId, pending.content);
+      console.log(`🔄 Auto-saved code (debounced)`);
+
+      // Also log a snapshot so every manual edit is preserved historically
+      if (pending.sessionId && pending.content) {
+        const snapshot = await createCodeSnapshot(
+          pending.codeId,
+          pending.sessionId,
+          pending.content,
+          'live_edit'
+        );
+        if (snapshot) {
+          console.log(`📸 Created code snapshot (live_edit)`);
+        }
+      }
+    } catch (error) {
+      console.error('Error auto-saving code:', error);
+    }
+  }, []);
+
+  /**
    * Update the content of the current code record with debounced live save
    */
   const updateCurrentCodeContent = useCallback((content) => {
@@ -498,30 +591,45 @@ export const SessionProvider = ({ children }) => {
     }
     
     // Set new timer for live save (1 second after user stops typing)
-    saveDebounceTimer.current = setTimeout(async () => {
-      if (currentCodeId) {
-        try {
-          await updateCodeContentService(currentCodeId, content);
-          console.log(`🔄 Auto-saved code (debounced)`);
+    pendingSaveRef.current = currentCodeId
+      ? { codeId: currentCodeId, sessionId: activeSession?.id, content }
+      : null;
+    saveDebounceTimer.current = setTimeout(savePendingCode, 1000); // 1 second debounce
+  }, [currentCodeId, activeSession, savePendingCode]);
 
-          // Also log a snapshot so every manual edit is preserved historically
-          if (activeSession && content) {
-            const snapshot = await createCodeSnapshot(
-              currentCodeId,
-              activeSession.id,
-              content,
-              'live_edit'
-            );
-            if (snapshot) {
-              console.log(`📸 Created code snapshot (live_edit)`);
-            }
-          }
-        } catch (error) {
-          console.error('Error auto-saving code:', error);
-        }
+  /**
+   * Close a code record (code tab). Soft delete — the row and its snapshots
+   * stay in the database, the tab is just hidden. Same rules as
+   * closeConversation; closing the active tab also saves any pending
+   * debounced edit first so the last second of typing isn't lost.
+   */
+  const closeCode = useCallback(async (codeId) => {
+    if (!activeSession) {
+      console.error('No active session');
+      return false;
+    }
+    if (openCodeRecords.length <= 1) return false;
+    const index = openCodeRecords.findIndex((c) => c.id === codeId);
+    if (index === -1) return false;
+
+    try {
+      if (codeId === currentCodeId) {
+        await savePendingCode();
+        const neighbor = openCodeRecords[index + 1] || openCodeRecords[index - 1];
+        const switched = await switchCode(neighbor.id);
+        if (!switched) return false;
       }
-    }, 1000); // 1 second debounce
-  }, [currentCodeId, activeSession]);
+
+      const closed = await closeCodeService(codeId);
+      if (!closed) return false;
+      logInteraction('close_code_tab', activeSession.id);
+      await loadCodeRecords(activeSession.id);
+      return true;
+    } catch (error) {
+      console.error('Error closing code record:', error);
+      return false;
+    }
+  }, [activeSession, openCodeRecords, currentCodeId, savePendingCode, switchCode, loadCodeRecords]);
 
   /**
    * Create a code snapshot (for historical record keeping)
@@ -558,11 +666,11 @@ export const SessionProvider = ({ children }) => {
 
   // Auto-select the first code tab if records are loaded but none is selected
   useEffect(() => {
-    if (codeRecords.length > 0 && !currentCodeId) {
-      setCurrentCodeId(codeRecords[0].id);
-      setCurrentCodeContent(codeRecords[0].content || '# Start your project here!\n');
+    if (openCodeRecords.length > 0 && !currentCodeId) {
+      setCurrentCodeId(openCodeRecords[0].id);
+      setCurrentCodeContent(openCodeRecords[0].content || '# Start your project here!\n');
     }
-  }, [codeRecords, currentCodeId]);
+  }, [openCodeRecords, currentCodeId]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -591,9 +699,9 @@ export const SessionProvider = ({ children }) => {
   const value = {
     activeSession,
     conversationHistory,
-    conversations,
+    conversations: openConversations,
     currentConversationId,
-    codeRecords,
+    codeRecords: openCodeRecords,
     currentCodeId,
     currentCodeContent,
     sessions,
@@ -612,10 +720,12 @@ export const SessionProvider = ({ children }) => {
     switchConversation,
     createNewConversation,
     updateConversationName,
+    closeConversation,
     loadConversations,
     switchCode,
     createNewCode,
     updateCodeName,
+    closeCode,
     updateCurrentCodeContent,
     createSnapshot,
     loadCodeRecords,

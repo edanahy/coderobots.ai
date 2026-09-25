@@ -445,6 +445,47 @@ export const updateConversationName = async (conversationId, name) => {
 };
 
 /**
+ * Close a conversation (chat tab). Soft delete: stamps deleted_at so the tab
+ * is hidden from the UI, but the row and its messages are kept for research.
+ */
+export const closeConversation = async (conversationId) => {
+  try {
+    if (!conversationId) {
+      console.error('conversation_id is required');
+      return null;
+    }
+
+    const updatePayload = {
+      deleted_at: new Date().toISOString(),
+    };
+
+    const validation = validate(conversationUpdateSchema, updatePayload);
+    if (!validation.success) {
+      console.error('Conversation update validation failed:', validation.error.issues);
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from(TABLES.CONVERSATIONS)
+      .update(validation.data)
+      .eq('id', conversationId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error closing conversation:', error);
+      return null;
+    }
+
+    console.log(`✅ Closed conversation ${conversationId}`);
+    return data;
+  } catch (error) {
+    console.error('Error in closeConversation:', error);
+    return null;
+  }
+};
+
+/**
  * Update session's current conversation
  */
 export const updateSessionConversation = async (sessionId, conversationId) => {
@@ -594,6 +635,47 @@ export const updateCodeName = async (codeId, name) => {
     return data;
   } catch (error) {
     console.error('Error in updateCodeName:', error);
+    return null;
+  }
+};
+
+/**
+ * Close a code record (code tab). Soft delete: stamps deleted_at so the tab
+ * is hidden from the UI, but the row and its snapshots are kept for research.
+ */
+export const closeCode = async (codeId) => {
+  try {
+    if (!codeId) {
+      console.error('code_id is required');
+      return null;
+    }
+
+    const updatePayload = {
+      deleted_at: new Date().toISOString(),
+    };
+
+    const validation = validate(codeUpdateSchema, updatePayload);
+    if (!validation.success) {
+      console.error('Code update validation failed:', validation.error.issues);
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from(TABLES.CODE)
+      .update(validation.data)
+      .eq('id', codeId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error closing code record:', error);
+      return null;
+    }
+
+    console.log(`✅ Closed code record ${codeId}`);
+    return data;
+  } catch (error) {
+    console.error('Error in closeCode:', error);
     return null;
   }
 };

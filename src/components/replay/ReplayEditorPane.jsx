@@ -64,6 +64,8 @@ const ReplayEditorPane = ({ frame, profile }) => {
           onSwitchCode={noop}
           onCreateCode={noop}
           onRenameCode={noop}
+          onCloseCode={noop}
+          readOnly
         />
       )}
       {showCodeTabs && frame.codeTabSwitched && (
