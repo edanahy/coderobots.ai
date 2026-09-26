@@ -99,13 +99,22 @@ function ensureDeps() {
   return depsPromise;
 }
 
+const DARK_THEME = {
+  background: '#191A19',
+  foreground: '#F5F2E7',
+  cursor: '#F5F2E7',
+  selectionBackground: '#F5F2E7',
+  selectionForeground: '#191A19',
+};
+
 /**
  * Create a terminal mounted in `target`, return a small controller object.
  *
  * @param {HTMLElement} target
+ * @param {{ theme?: object }} [options] xterm theme (defaults to dark)
  * @returns {Promise<{write: (s:string)=>void, clear: ()=>void, dispose: ()=>void, fit: ()=>void, terminal: any}>}
  */
-export async function createLegoTerminal(target) {
+export async function createLegoTerminal(target, { theme = DARK_THEME } = {}) {
   installXtermErrorShield();
   ensureFitStyles();
   const { Terminal, FitAddon } = await ensureDeps();
@@ -119,13 +128,7 @@ export async function createLegoTerminal(target) {
     cursorBlink: true,
     cursorStyle: 'block',
     convertEol: true,
-    theme: {
-      background: '#191A19',
-      foreground: '#F5F2E7',
-      cursor: '#F5F2E7',
-      selectionBackground: '#F5F2E7',
-      selectionForeground: '#191A19',
-    },
+    theme,
   });
 
   const fitAddon = new FitAddon();

@@ -805,3 +805,51 @@ tabs to the same name, which name-keyed replay can't tell apart.
 *latest* close, so close/reopen/close sequences would need the interactions
 log to carry the tab id — worth adding a tab id to `interactions` then?
 Relatedly, see R12/R14 for other fields the replay viewer drops today.
+
+---
+
+## R18 — SPIKE Prime hub file management beyond "Save as Library"
+
+**Status:** idea
+
+**Problem:** the SPIKE platform (2026-09-26) has one file feature: "Save as
+Library" in USB REPL mode writes the current code tab to
+`/flash/lib/<name>.py`. As students write bigger projects they'll want to see
+and manage what's on the hub: which libraries exist, what's in each program
+slot, deleting stale files, and shipping helper modules over Bluetooth
+(where there is no REPL).
+
+**What's already known (verified on hub firmware 1.8.149 / MicroPython
+1.20):**
+- REPL runs and slot programs share `sys.path = ['', '.frozen', '/flash',
+  '/flash/lib']`; a slot program's cwd is its own `/flash/program/NN/`.
+- The LEGO protocol's `StartFileUploadRequest` accepts any file name (≤31
+  bytes) into a slot folder, and a slot program can `import` a sibling file
+  uploaded that way — so helper modules *can* travel over BLE, but only into
+  a slot folder, never `/flash/lib`. `ClearSlotRequest` removes the whole
+  folder.
+- `/flash` also holds system files (`boot.py`, `main.py`, `config/`,
+  `pybcdc.inf`, `README.txt`) that a browser must protect.
+- The REPL caches imports; runs already purge `/flash` modules first
+  (`PURGE_USER_MODULES` in `src/utils/spike/replLibrary.js`).
+
+**Ideas, roughly in order of value:**
+1. **Bundle tabs into a slot download** (works on USB slot mode *and* BLE):
+   a "include these tabs as modules" picker next to Download; each tab is
+   uploaded as `<module>.py` beside `program.py`.
+2. **Hub Files browser** (USB REPL only): tree of `/flash`, open a file into
+   a new code tab (needs `createNewCode({ name, content })` in
+   `SessionContext`), save a tab to any path, delete/rename/new folder,
+   system files read-only.
+3. **Save as Library from slot mode** over USB by hopping to the REPL and
+   back automatically (Ctrl-C … Ctrl-D, ~2 s).
+4. **Rename the hub** (`SetHubNameRequest`, id 22 — works over USB and BLE).
+
+**Affected files:** `src/utils/spike/replLibrary.js` (REPL file ops),
+`src/utils/spike/hubClient.js` (multi-file slot upload),
+`src/components/spike/*`, `SessionContext.jsx` (tab from file),
+`DATA_COLLECTION.md` (new `button_name`/`save_source` values).
+
+**Open questions:** should a bundled helper be a live copy of another tab
+(re-sent on every download), or a snapshot the student picks each time?
+Should library files show up somewhere in the session replay?

@@ -34,10 +34,15 @@ import {
 } from '../utils/esp32/esp32Flasher.js';
 import { ESP32_USB_FILTERS, findAuthorizedEsp32SerialPort } from '../utils/esp32/esp32UsbFilters.js';
 import { compileSketch, Esp32CompileError } from '../utils/esp32/esp32Compile.js';
+import { PURGE_USER_MODULES } from '../utils/spike/replLibrary.js';
 import CodeEditor from './CodeEditor.jsx';
 import ControlPanel from './ControlPanel.jsx';
 import CodeTabs from './CodeTabs.jsx';
 import FlashProgressModal from './FlashProgressModal.jsx';
+import SpikeControlPanel from './spike/SpikeControlPanel.jsx';
+import SpikeSensorPanel from './spike/SpikeSensorPanel.jsx';
+import SpikeLibraryModal from './spike/SpikeLibraryModal.jsx';
+import useSpikeHub from './spike/useSpikeHub.js';
 import { useSession } from '../contexts/SessionContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { logConsole, logInteraction } from '../services/dataLogger';
@@ -63,7 +68,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     type: 'info',
     message: t('notConnected')
   });
-  const [mode, setMode] = useState('disconnected');
   const [isRunning, setIsRunning] = useState(false);
   const [buffer, setBuffer] = useState('');
   // 'idle' | 'probing' | 'flashing' | 'reconnecting'
@@ -72,8 +76,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   const [flashMessage, setFlashMessage] = useState('');
   // LEGO Education BLE: per-kind device lists for the ControlPanel icon row.
   const [legoConnectionState, setLegoConnectionState] = useState(legoGetConnectionState);
-  // SPIKE Prime: which program slot (0-19) "Save to Slot" writes to.
-  const [selectedSlot, setSelectedSlot] = useState(0);
 
   const {
     codeRecords,
@@ -92,6 +94,9 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   // ESP32 C++/Arduino: sketches compile on the Modal arduino-cli service and
   // flash over WebSerial via esptool-js — no REPL, raw serial monitor only.
   const isArduinoMode = activePlatform?.connectionType === 'esp32-arduino';
+  // SPIKE Prime: USB (REPL ⇄ Hub OS slot mode) or Bluetooth (Hub OS only);
+  // see components/spike/useSpikeHub.js.
+  const isSpikeMode = activePlatform?.connectionType === 'spike';
 
   const editorRef = useRef(null);
   const boardRef = useRef(null);
@@ -164,6 +169,48 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       logConsoleSafe(bufferRef.current, 'run_device');
     }
   };
+
+  // Mirror app-generated output into the console buffer (run logging, the
+  // console-content-changed event and "Add Console to Chat" read it).
+  const appendOutput = (text) => {
+    bufferRef.current = (bufferRef.current + text).slice(-FIFO_SIZE);
+    setBuffer(bufferRef.current);
+  };
+
+  const spike = useSpikeHub({
+    enabled: isSpikeMode,
+    boardRef,
+    terminalHostRef: replContainerRef,
+    tRef,
+    operationInFlightRef,
+    appendOutput,
+    setConnected,
+    setStatusBanner,
+    onReplRunReset: () => {
+      pendingRunSaveRef.current = false;
+      setIsRunning(false);
+    },
+    onDisconnected: () => {
+      bufferRef.current = '';
+      pendingRunSaveRef.current = false;
+      setBuffer('');
+      setConnected(false);
+      setIsRunning(false);
+      setStatusBanner({ type: 'info', message: tRef.current('deviceDisconnected') });
+    },
+    logInteraction: logInteractionSafe,
+    logConsole: logConsoleSafe,
+    getConsole: () => bufferRef.current,
+    createSnapshot,
+    getCode: () => editorRef.current?.getCode() || currentCodeContent,
+    stopCode: activePlatform?.stopCode,
+  });
+  // The Board's callbacks are created once on mount; reach the hook's latest
+  // handlers through this ref.
+  const spikeRef = useRef(spike);
+  useEffect(() => {
+    spikeRef.current = spike;
+  });
 
   const getConnectionErrorMessage = (error) => {
     // Use tRef so the once-created Board `onerror` callback still reports in
@@ -530,7 +577,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
           console.log('Device connected');
           setIsConnecting(false);
           setConnected(true);
-          setMode('repl');
           setStatusBanner({
             type: 'success',
             message: tRef.current('deviceConnectedRepl')
@@ -543,7 +589,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
           setConnectedBoard(null);
           setConnectedPlatformId(null);
           setConnectPhase('idle');
-          setMode('disconnected');
           bufferRef.current = '';
           pendingRunSaveRef.current = false;
           setBuffer('');
@@ -552,6 +597,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
             type: 'info',
             message: tRef.current('deviceDisconnected')
           });
+          spikeRef.current?.handleUsbDisconnected();
         },
         onportselected: () => {
           setStatusBanner({
@@ -699,6 +745,11 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       return;
     }
 
+    if (isSpikeMode && spike.transport === 'ble') {
+      await spike.disconnectBle();
+      return;
+    }
+
     const board = boardRef.current;
     if (!board || isConnecting) return;
 
@@ -711,6 +762,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       });
       await logInteractionSafe('disconnect');
       await logConsoleSafe(bufferRef.current, 'disconnect');
+      if (isSpikeMode) await spike.prepareUsbDisconnect();
       await board.disconnect();
     }
     finally {
@@ -831,7 +883,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       await board.paste(activePlatform.stopCode, { hidden: true });
     }
     setConnectedBoard('spike');
-    setMode('repl');
+    spike.handleUsbConnected();
   };
 
   const handleConnect = async (targetBoard) => {
@@ -888,7 +940,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       setConnected(false);
       setConnectedBoard(null);
       setConnectedPlatformId(null);
-      setMode('disconnected');
       setIsRunning(false);
       const message = getConnectionErrorMessage(error);
       setStatusBanner({ type: 'error', message });
@@ -989,6 +1040,9 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
 
       setIsRunning(true);
       try {
+        // SPIKE: forget modules imported from /flash so a library saved
+        // since the last run is re-imported instead of served from cache.
+        if (connectedBoard === 'spike') await board.paste(PURGE_USER_MODULES, { hidden: true });
         await board.paste(codeToRun, { hidden: false });
         // Code is now fully sent (paste-mode echoes are done). Arm the save so
         // the returning `>>> ` prompt — the program finishing — saves the console.
@@ -1076,7 +1130,6 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     await board.reset();
     await new Promise(resolve => setTimeout(resolve, 1000));
     await board.interrupt();
-    setMode('repl');
     board.terminal?.focus();
   };
 
@@ -1090,6 +1143,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     }
     legoTerminalRef.current?.clear();
     arduinoTerminalRef.current?.clear();
+    spike.clearTerminal();
     bufferRef.current = '';
     setBuffer('');
   };
@@ -1118,101 +1172,10 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         await board.upload('main.py', codeToSave);
       }
       await board.reset();
-      setMode('repl');
       board.terminal?.focus();
     } catch (error) {
       console.error('Failed to save to main.py:', error);
       alert(`${t('failedToSaveMainPy')}${error.message}`);
-    }
-  };
-
-  // SPIKE Prime: leave Program Slot mode and go back to an interactive REPL.
-  const handleEnterReplMode = async () => {
-    const board = boardRef.current;
-    if (!board || !connected) return;
-
-    await logInteractionSafe('switch_to_repl_mode');
-    await board.interrupt(150);
-    setMode('repl');
-    board.terminal?.focus();
-  };
-
-  // SPIKE Prime: reset the hub into whichever program slot it's set to run,
-  // leaving the REPL (so Run/Stop no longer apply until back in REPL mode).
-  const handleEnterProgramSlotMode = async () => {
-    const board = boardRef.current;
-    if (!board || !connected) return;
-
-    await logInteractionSafe('switch_to_program_slot_mode');
-    setIsRunning(false);
-    await board.reset();
-    setMode('program-slot');
-    board.terminal?.focus();
-  };
-
-  // SPIKE Prime: write the current code as /flash/program/<slot>/program.py so
-  // it runs autonomously on the hub, untethered from the browser.
-  const handleSaveToSlot = async () => {
-    const board = boardRef.current;
-    if (!board || !connected) {
-      alert(t('cannotSaveToSlotDevice'));
-      return;
-    }
-
-    const codeToSave = editorRef.current?.getCode() || currentCodeContent;
-
-    await createSnapshot(`save_to_slot_${selectedSlot}`);
-    await logInteractionSafe(`save_to_slot_${selectedSlot}`);
-
-    const slotStr = String(selectedSlot).padStart(2, '0');
-    const escapedCode = JSON.stringify(codeToSave);
-
-    const script = `
-import os
-import sys
-
-slot_dir_name = "${slotStr}"
-code_to_write = ${escapedCode}
-program_dir = "program"
-target_file = "program.py"
-
-# Ensure we are in the root directory
-if (not os.getcwd() == '/flash'):
-    os.chdir('/flash')
-
-# Check for 'program' directory, create if it doesn't exist
-if program_dir not in os.listdir():
-    os.mkdir(program_dir)
-os.chdir(program_dir)
-
-# Check for the specific slot directory, create if it doesn't exist
-if slot_dir_name not in os.listdir():
-    os.mkdir(slot_dir_name)
-os.chdir(slot_dir_name)
-
-# Clean up old program files to ensure our .py file runs
-for filename in ['program.mpy', 'program.py']:
-    try:
-        os.remove(filename)
-    except OSError:
-        pass # File didn't exist, which is fine
-
-# Write the new program file in chunks of chunk_size characters
-with open(target_file, "w") as f:
-    f.write(code_to_write)
-
-# Try to return to the root directory
-os.chdir('/flash')
-`;
-
-    try {
-      await board.paste(script, { hidden: false });
-      await board.reset();
-      setMode('program-slot');
-      board.terminal?.focus();
-    } catch (error) {
-      console.error('Failed to save to slot:', error);
-      alert(`${t('failedToSaveToSlot')}${error.message}`);
     }
   };
 
@@ -1236,7 +1199,6 @@ os.chdir('/flash')
         await board.runStatement('import os');
         await board.runStatement("os.remove('main.py') if 'main.py' in os.listdir() else None");
         await board.reset();
-        setMode('repl');
         board.terminal?.focus();
       } catch (error) {
         console.error('Failed to clear main.py from ESP32:', error);
@@ -1267,7 +1229,6 @@ os.chdir('/flash')
         await board.runStatement('import os');
         await board.runStatement("os.remove('main.py') if 'main.py' in os.listdir() else None");
         await board.reset();
-        setMode('repl');
         board.terminal?.focus();
       } catch (error) {
         console.error('Failed to clear download from micro:bit:', error);
@@ -1301,7 +1262,6 @@ os.chdir('/flash')
       try {
         await uploadFileToMicrobit(board, 'main.py', codeToSave, { label: 'main.py' });
         await board.reset();
-        setMode('repl');
         board.terminal?.focus();
       } catch (error) {
         console.error('Failed to download to micro:bit:', error);
@@ -1320,6 +1280,17 @@ os.chdir('/flash')
         progress={flashProgress}
         message={flashMessage}
       />
+      {isSpikeMode && (
+        <SpikeLibraryModal
+          visible={spike.library.open}
+          tabName={codeRecords.find((record) => record.id === currentCodeId)?.name}
+          existing={spike.library.existing}
+          saving={spike.library.saving}
+          error={spike.library.error}
+          onSave={spike.saveAsLibrary}
+          onClose={spike.closeLibrary}
+        />
+      )}
       <CodeTabs
         codeRecords={codeRecords}
         currentCodeId={currentCodeId}
@@ -1344,45 +1315,57 @@ os.chdir('/flash')
 
         <div className="child bottom-child">
           <div className="status-and-control-row">
-            <ControlPanel
-              connected={connected}
-              connectedBoard={connectedBoard}
-              platformConnectionType={activePlatform?.connectionType}
-              isConnecting={isConnecting}
-              onConnectMicrobit={() => handleConnect('microbit')}
-              onConnectPico={() => handleConnect('pico')}
-              onConnectEsp32={() => handleConnect('esp32')}
-              onConnectEsp32Arduino={handleArduinoConnect}
-              onConnectSpike={() => handleConnect('spike')}
-              onDisconnect={handleDisconnect}
-              onRun={handleRun}
-              onCtrlC={handleCtrlC}
-              onReset={handleReset}
-              onClear={handleClear}
-              onSaveToMain={handleSaveToMain}
-              onDownload={handleDownload}
-              onClearDownload={handleClearDownload}
-              onClearMain={handleClearMain}
-              mode={mode}
-              selectedSlot={selectedSlot}
-              onSlotChange={setSelectedSlot}
-              onEnterReplMode={handleEnterReplMode}
-              onEnterProgramSlotMode={handleEnterProgramSlotMode}
-              onSaveToSlot={handleSaveToSlot}
-              legoConnectionState={legoConnectionState}
-              onLegoPickerOpen={handleLegoPickerOpen}
-              onLegoConnectDevice={handleLegoDeviceConnect}
-              onLegoRenameDevice={handleLegoDeviceRename}
-              onLegoDisconnectDevice={handleLegoDeviceDisconnect}
-            />
+            {isSpikeMode ? (
+              <SpikeControlPanel
+                spike={spike}
+                connected={connected}
+                isConnecting={isConnecting}
+                onConnectUsb={() => handleConnect('spike')}
+                onDisconnect={handleDisconnect}
+                onClear={handleClear}
+                onRun={handleRun}
+                onStop={handleCtrlC}
+                onReset={handleReset}
+              />
+            ) : (
+              <ControlPanel
+                connected={connected}
+                connectedBoard={connectedBoard}
+                platformConnectionType={activePlatform?.connectionType}
+                isConnecting={isConnecting}
+                onConnectMicrobit={() => handleConnect('microbit')}
+                onConnectPico={() => handleConnect('pico')}
+                onConnectEsp32={() => handleConnect('esp32')}
+                onConnectEsp32Arduino={handleArduinoConnect}
+                onDisconnect={handleDisconnect}
+                onRun={handleRun}
+                onCtrlC={handleCtrlC}
+                onReset={handleReset}
+                onClear={handleClear}
+                onSaveToMain={handleSaveToMain}
+                onDownload={handleDownload}
+                onClearDownload={handleClearDownload}
+                onClearMain={handleClearMain}
+                legoConnectionState={legoConnectionState}
+                onLegoPickerOpen={handleLegoPickerOpen}
+                onLegoConnectDevice={handleLegoDeviceConnect}
+                onLegoRenameDevice={handleLegoDeviceRename}
+                onLegoDisconnectDevice={handleLegoDeviceDisconnect}
+              />
+            )}
             {!connected && (
               <div className={`status-banner ${statusBanner.type}`}>
                 {statusBanner.message}
               </div>
             )}
           </div>
-          <div className="terminal-wrapper" ref={replContainerRef}>
-            {/* The micro_repl Board will render the xterm terminal here */}
+          <div className="terminal-row">
+            <div className="terminal-wrapper" ref={replContainerRef}>
+              {/* The micro_repl Board will render the xterm terminal here */}
+            </div>
+            {isSpikeMode && connected && spike.mode === 'hub' && spike.sensorsOpen && (
+              <SpikeSensorPanel deviceState={spike.deviceState} onClose={spike.toggleSensors} />
+            )}
           </div>
         </div>
       </div>

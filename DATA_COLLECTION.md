@@ -212,9 +212,10 @@ Append-only history of code edits and significant events. Every meaningful chang
 | `manual_save` | `App.jsx` Save button | User explicitly hit Save |
 | `chat_context` | `ChatPanel` when attaching code to a prompt | Snapshot taken so the message context is reproducible |
 | `ai_replace` | `App.jsx` `handleReplaceCode`, via `ChatPanel`'s code-block "Replace" button | Captures the state right after an AI-generated replacement |
-| `run_device` | `SPIKEEditor` Run button (serial platforms, LEGO, Arduino) | Code as it was when sent to the hardware |
+| `run_device` | `SPIKEEditor` Run button (serial platforms, LEGO, Arduino), and SPIKE "Download and Run" (slot mode / Bluetooth) | Code as it was when sent to the hardware |
 | `save_to_main_py` | `SPIKEEditor` (Pico / ESP32 MicroPython) | Saved code as `main.py` on the device |
-| `save_to_slot_<n>` | `SPIKEEditor` (SPIKE) | Saved code to program slot `<n>` (0–19) to run autonomously on the hub |
+| `save_to_slot_<n>` | `SPIKEEditor` (SPIKE "Download", slot mode over USB or Bluetooth) | Saved code to program slot `<n>` (0–19) to run autonomously on the hub |
+| `save_to_library` | `SPIKEEditor` (SPIKE "Save as Library", USB REPL mode) | Code tab saved to the hub as `/flash/lib/<name>.py` (the module name itself is not logged) |
 | `download_to_microbit` | `SPIKEEditor` (micro:bit / Cutebot) | Flashed code to the micro:bit |
 
 > Indexes `idx_code_snapshots_code_id`, `idx_code_snapshots_session_id`, and `idx_code_snapshots_timestamp` exist to make history lookups cheap.
@@ -243,8 +244,8 @@ Captures of the xterm.js terminal output.
 | `init` | `sessionManager.createNewSession` | Empty console row created with the session |
 | `manual_save` | `App.jsx` Save button | User explicitly hit Save |
 | `chat_context` | `ChatPanel` when attaching console output to a prompt | Capture so the prompt context is reproducible |
-| `run_device` | `SPIKEEditor`, when a run finishes (REPL prompt returns) | Full console buffer at the moment a run completed |
-| `disconnect` | `SPIKEEditor`, on manual Disconnect **and** on the auto-disconnect triggered by switching to a session on a different platform | Buffer captured right before the device connection is torn down |
+| `run_device` | `SPIKEEditor`, when a run finishes: the REPL prompt returns, or — SPIKE slot mode / Bluetooth — the hub reports the program stopped (including programs started with the hub's own button) | Full console buffer at the moment a run completed |
+| `disconnect` | `SPIKEEditor`, on manual Disconnect (USB or SPIKE Bluetooth) **and** on the auto-disconnect triggered by switching to a session on a different platform | Buffer captured right before the device connection is torn down. Not captured when the link drops on its own (cable pulled, hub switched off) |
 | `reset_device` | `SPIKEEditor` Reset button | Buffer captured right before a soft reset |
 | `clear_console` | `SPIKEEditor` Clear Console button | Captures the buffer right before clearing |
 
@@ -270,7 +271,8 @@ Toolbar/button/session-lifecycle click events. Pure analytics — no payload bey
 
 | Value | Trigger |
 |---|---|
-| `connect_<board>` | Connect button, where `<board>` is the target board id (`pico`, `microbit`, `esp32`, `spike`) |
+| `connect_<board>` | Connect button, where `<board>` is the target board id (`pico`, `microbit`, `esp32`, `spike`). For SPIKE, `connect_spike` is "Connect via USB" |
+| `connect_spike_ble` | SPIKE "Connect via Bluetooth" (logged when the button is clicked, before the browser's device picker) |
 | `connect_lego` | LEGO device connect (inside the BLE device picker) |
 | `connect_esp32_arduino` | ESP32 (C++/Arduino) connect |
 | `open_lego_picker` | LEGO "Connect Hardware" button (opens the BLE device picker) |
@@ -281,9 +283,13 @@ Toolbar/button/session-lifecycle click events. Pure analytics — no payload bey
 | `reset_device` | Soft reset |
 | `clear_console` | Clear console |
 | `save_to_main_py` | Save as `main.py` on Pico/ESP32 MicroPython |
-| `save_to_slot_<n>` | SPIKE "Save to Slot", slot `<n>` (0–19) |
-| `switch_to_repl_mode` | SPIKE REPL⇄Program-Slot toggle → REPL mode |
-| `switch_to_program_slot_mode` | SPIKE REPL⇄Program-Slot toggle → Program-Slot mode |
+| `save_to_slot_<n>` | SPIKE "Download" to slot `<n>` (0–19), slot mode over USB or Bluetooth |
+| `download_and_run_slot_<n>` | SPIKE "Download and Run" on slot `<n>` (0–19) |
+| `stop_slot_program` | SPIKE Stop in slot mode / Bluetooth (stops the running hub program) |
+| `open_hub_sensors` | SPIKE "Sensors" panel opened (closing isn't logged) |
+| `save_to_library` | SPIKE "Save as Library" (USB REPL mode) |
+| `switch_to_repl_mode` | SPIKE REPL⇄Slots toggle → REPL mode (USB only) |
+| `switch_to_program_slot_mode` | SPIKE REPL⇄Slots toggle → Slots (Hub OS) mode (USB only) |
 | `clear_main_esp32` | Clear ESP32 MicroPython main file |
 | `clear_download_microbit` | Clear queued micro:bit download |
 | `download_to_microbit` | Flash code to micro:bit |

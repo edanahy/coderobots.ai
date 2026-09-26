@@ -159,7 +159,7 @@ Hardware platforms are registered in `src/platforms/index.js` and each lives in 
 - `esp32` → "ESP32 (MicroPython)", connectionType `esp32`, serial REPL, uses `postConnectFiles`
 - `esp32-arduino` → "ESP32 (C++/Arduino)", connectionType `esp32-arduino` (Modal compile + esptool-js flash, no REPL; `stopCode: null`, `editorLanguage: 'cpp'`, C++ `starterCode`)
 - `lego` → connectionType `lego-ble` (Web Bluetooth + Pyodide, no serial; `stopCode: null`)
-- `spike` → "LEGO SPIKE Prime", connectionType `spike`, serial REPL (same WebSerial/MicroPython-REPL protocol as `pico`/`esp32`/`microbit`, no special USB filters), SPIKE App 3 firmware only (no SPIKE 2 support); ported from the Fall 2025 EN1 Editor. Adds a REPL-mode ⇄ Program-Slot-mode toggle in `SPIKEEditor`/`ControlPanel` so code can be saved to run autonomously on the hub (slots 0-19, `/flash/program/<slot>/program.py`), untethered from the browser — no tutor-mode support
+- `spike` → "LEGO SPIKE Prime", connectionType `spike`, SPIKE App 3 firmware only (no SPIKE 2 support); ported from the Fall 2025 EN1 Editor. Connects over USB (WebSerial: MicroPython REPL ⇄ Hub OS "Slots" mode) or Bluetooth (Web Bluetooth: Hub OS only) — see "SPIKE Prime" below; no tutor-mode support
 
 `editorLanguage` ('cpp'; default python) switches the CodeMirror mode and the chat code-fence language; `starterCode` seeds new code tabs (threaded through `createNewSession({initialCode})`/`createCode`). `tutorHwMode` (microbit / esp32-arduino→`esp32` / lego) marks tutor-pipeline support; platforms without it are unsupported in `chat.mode: 'tutor'`. Note the tutor `esp32` prompt bundle (`modal_functions/prompts/esp32.py`) is Arduino C++ (SmartMotor), so it belongs to `esp32-arduino`, not the MicroPython platform. Instances gate the offered subset via `instance.platforms` (`getPlatform()` stays unfiltered so legacy sessions remain readable). When adding a new platform, drop a folder under `src/platforms/`, export the platform object, and register it in `src/platforms/index.js`.
 
@@ -189,6 +189,27 @@ COOP/COEP headers are set in `vite.config.js` (dev/preview) and `vercel.json`
 (prod); removing them breaks LEGO mode. The Pyodide worker boots lazily on
 first LEGO connect. Run dispatches to `pyodideRunner.runPython`; stop is
 `interruptPython()` + `stopAllMotion()`.
+
+The **SPIKE Prime** platform (`spike`) has its own control panel
+(`src/components/spike/SpikeControlPanel.jsx`, state in `useSpikeHub.js`)
+and two transports. Disconnected, it offers "Connect via USB" / "Connect via
+Bluetooth"; disconnecting (or the hub dropping) returns there.
+- **USB** reuses the microRepl `Board` and lands in the **REPL** (Run/Stop/
+  Reset, plus "Save as Library" → `/flash/lib/<name>.py`, importable from
+  REPL runs *and* slot programs). Runs first purge `/flash` modules from
+  `sys.modules` so edited libraries re-import. The **Slots** toggle soft-
+  reboots (Ctrl-D) into Hub OS; Ctrl-C drops back to the REPL.
+- **Hub OS** (USB Slots mode, or Bluetooth) speaks the LEGO SPIKE Prime
+  protocol (https://lego.github.io/spike-prime-docs/) — COBS-escaped, XOR
+  0x03, `0x02`-terminated frames — via `src/utils/spike/` (`cobs.js`,
+  `messages.js`, transport-agnostic `hubClient.js`, `boardTransport.js` for
+  USB via `Board.setRawReceiver`/`writeBytes`, `bleTransport.js` for GATT
+  service `FD02`). UI: slot 0–19, Download / Download and Run / Stop,
+  decoded `print()` output (ConsoleNotification), and a live Sensors panel
+  (DeviceNotification: ports A–F, IMU, 5×5 display, battery). Over USB the
+  hub drops frames written in one burst, so the client sends
+  `maxPacketSize` (512) packets 5 ms apart. After Ctrl-D, Hub OS needs
+  ~1.5–2 s before it answers the handshake.
 
 ### Per-User Hardware Configuration (LilyBot)
 
