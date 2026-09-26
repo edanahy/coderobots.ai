@@ -66,7 +66,10 @@ instance: telemetry instances need `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
 and `VITE_MODAL_BUDGET_ENDPOINT_URL` (direct chat); tutor instances need
 `VITE_MODAL_TUTOR_ENDPOINT_URL`; instances offering the `esp32-arduino`
 platform need `VITE_ESP32_COMPILE_URL`. `VITE_INSTANCE` picks the instance
-config.
+config. `VITE_ENV_LABEL` (optional; set only for local dev and Vercel
+Preview, never Production) turns on the non-production frame/title/favicon
+indicator in `src/config/applyEnvBadge.js`; `VITE_ENV_COLOR` overrides its
+default orange.
 
 ## Architecture
 
