@@ -13,13 +13,8 @@ const ChatConfiguration = ({
   showUsage = true,
   selectedModel,
   onModelChange,
-  attachDocumentation,
-  onAttachDocumentationChange,
   modelsByProvider,
-  streamableByModel,
-  selectedModelStreaming,
   dailyUsagePercentage,
-  dailyUsageLoading,
 }) => {
   const { t } = useLanguage();
   const usagePercent = Number.isFinite(dailyUsagePercentage) ? Math.max(0, Math.min(100, Math.round(dailyUsagePercentage))) : 0;

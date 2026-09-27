@@ -19,8 +19,6 @@
  * Python is "waiting".
  */
 
-/* eslint-disable no-restricted-globals */
-
 const PYODIDE_VERSION = 'v0.26.4';
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full`;
 

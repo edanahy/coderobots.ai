@@ -469,7 +469,7 @@ class LegoDevice {
     if (arr.length === 0) this._pendingResponses.delete(key);
   }
   _rejectAllPending(reason) {
-    for (const [, arr] of this._pendingResponses) for (const e of arr) { try { e.reject(new Error(reason)); } catch(x) {} }
+    for (const [, arr] of this._pendingResponses) for (const e of arr) { try { e.reject(new Error(reason)); } catch {} }
     this._pendingResponses.clear();
   }
 

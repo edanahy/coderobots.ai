@@ -331,7 +331,7 @@ export default function Board({
      * @param {string | Element} target where the REPL shows its output or accepts its input.
      * @returns
      */
-    connect: async (target, named = true, { boardType = 'generic', serialPort = null } = {}) => {
+    connect: async (target, named = true, { serialPort = null } = {}) => {
       if (port) return board;
       if (typeof target === 'string') {
         target = (

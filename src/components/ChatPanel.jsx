@@ -269,50 +269,6 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     }
   };
 
-  /**
-   * Extract Python code snippets from message content
-   * Returns array of { code, key } objects
-   * @param {string} content - The message content
-   * @param {string} messageId - The database message ID (used for consistent keys)
-   */
-  const extractPythonSnippets = (content, messageId) => {
-    const snippets = [];
-    
-    // Split by console blocks first (4 backticks)
-    const consoleSegments = content.split(/````([\s\S]*?)````/g);
-    
-    consoleSegments.forEach((consoleSeg, consoleIdx) => {
-      if (consoleIdx % 2 === 0) {
-        // Not a console block, check for code blocks (3 backticks)
-        const codeBlocks = consoleSeg.split(/```([\s\S]*?)```/g);
-        
-        for (let i = 1; i < codeBlocks.length; i += 2) {
-          const block = codeBlocks[i];
-          let codeText = block;
-          let lang = '';
-          
-          const firstNL = block.indexOf('\n');
-          if (firstNL !== -1) {
-            const firstLine = block.slice(0, firstNL).trim();
-            if (/^[a-zA-Z0-9+#-]+$/.test(firstLine)) {
-              lang = firstLine;
-              codeText = block.slice(firstNL + 1);
-            }
-          }
-          
-          const isPython = lang === 'python' || lang === 'py';
-          if (isPython && codeText.trim()) {
-            // Use messageId and match the rendering key format
-            const key = `msg-${messageId}-${consoleIdx}-${i}`;
-            snippets.push({ code: codeText, key });
-          }
-        }
-      }
-    });
-    
-    return snippets;
-  };
-
   const handleSendMessage = async () => {
     if (!activeSession) {
       alert(t('noActiveSession'));
@@ -794,9 +750,6 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     const color = isUser ? '#fbe2d7' : message.role === 'system' ? '#d7e4fb' : '#d8f6d8';
     const align = isUser ? 'align-right' : 'align-left';
 
-    // Use messageId from database for consistent keys, fallback to index for display
-    const messageKey = message.messageId || index;
-
     // First split by console blocks (4 backticks)
     const consoleSegments = message.content.split(/````([\s\S]*?)````/g);
 
@@ -848,13 +801,6 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
                     }
                   }
 
-                  // Create unique key for this code snippet using messageId from database
-                  const codeKey = `msg-${messageKey}-${consoleIdx}-${codeIdx}`;
-                  
-                  // Check if this is Python code from a bot message
-                  const isPython = lang === 'python' || lang === 'py';
-                  const isBot = !isUser && message.role !== 'system';
-                  
                   return (
                     <div key={`${consoleIdx}-${codeIdx}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                       <button
@@ -885,8 +831,6 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
         modelsByProvider={modelMetadata.modelsByProvider}
-        streamableByModel={modelMetadata.streamableByModel}
-        selectedModelStreaming={selectedModelStreaming}
         dailyUsagePercentage={dailyUsagePercentage}
         dailyUsageLoading={dailyUsageLoading}
       />
@@ -979,7 +923,6 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
         visible={budgetErrorVisible}
         onClose={() => setBudgetErrorVisible(false)}
         accessLevel={userAccessLevel}
-        premiumModels={modelMetadata.premiumModels}
         nonPremiumModels={modelMetadata.nonPremiumModels}
       />
 
