@@ -37,6 +37,7 @@ import { compileSketch, Esp32CompileError } from '../utils/esp32/esp32Compile.js
 import { PURGE_USER_MODULES } from '../utils/spike/replLibrary.js';
 import { RUN_OUTPUT_LIMIT, SPIKE_RUN, runEndEvent } from '../utils/spike/runLog.js';
 import { isFromAi } from '../utils/aiCodeTracker.js';
+import { stripAnsi } from '../utils/consoleText.js';
 import CodeEditor from './CodeEditor.jsx';
 import ControlPanel from './ControlPanel.jsx';
 import CodeTabs from './CodeTabs.jsx';
@@ -200,9 +201,10 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   };
 
   // Mirror app-generated output into the console buffer (run logging, the
-  // console-content-changed event and "Add Console to Chat" read it).
+  // console-content-changed event and "Add Console to Chat" read it). Colours
+  // are for the terminal only — the console record stays plain text.
   const appendOutput = (text) => {
-    bufferRef.current = (bufferRef.current + text).slice(-FIFO_SIZE);
+    bufferRef.current = (bufferRef.current + stripAnsi(text)).slice(-FIFO_SIZE);
     setBuffer(bufferRef.current);
   };
 
@@ -425,7 +427,8 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       // buffer so run logging, the console-content-changed event and "Add
       // Console to Chat" behave exactly like the serial path.
       const appendOutput = (text) => {
-        bufferRef.current = (bufferRef.current + text).slice(-FIFO_SIZE);
+        // Colours are for the terminal only — the console record stays plain text.
+        bufferRef.current = (bufferRef.current + stripAnsi(text)).slice(-FIFO_SIZE);
         setBuffer(bufferRef.current);
       };
       const io = {

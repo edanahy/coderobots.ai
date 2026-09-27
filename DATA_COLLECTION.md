@@ -256,6 +256,8 @@ Captures of the xterm.js terminal output.
 
 Non-`chat_context` writes also update the parent session's `current_console_id` and `last_updated`.
 
+**Terminal control codes in `content`:** the app's own status lines (SPIKE "Downloading to slot…", "▶ Program started", ESP32 "Compiling…") are coloured in the live terminal only and stored as plain text. Device output is stored exactly as received, so it can contain terminal control codes — notably MicroPython's REPL line editing, which sends backspace + `ESC[K` for ⌫ and `ESC[nD` redraws for arrow-key edits. The in-app viewers (`/users` "View console", chat's console view, `/view-data` replay) render these the way the terminal showed them (`src/utils/consoleText.js` `renderTerminalText`), but the raw `/data` CSV export does not. Captures from before 2026-09-26 may also contain the colour codes of SPIKE/ESP32 status lines (`ESC[36m…ESC[0m`).
+
 **Console output between capture points is not logged incrementally** — only at the discrete moments above. A student running code many times in a row without triggering Save/Reset/Disconnect/Clear between runs will still get one full capture per run (each `run_device` capture happens when that run finishes), but truly continuous "everything printed, moment to moment" isn't captured; only the accumulated buffer at each of those moments is.
 
 ---

@@ -180,7 +180,7 @@ const ReplayChatPane = ({ frame, profile }) => {
         isOpen={consoleModal.open}
         consoleContent={consoleModal.content}
         onClose={() => setConsoleModal({ open: false, content: '' })}
-        onCopy={() => navigator.clipboard?.writeText(consoleModal.content)}
+        onCopy={(text) => navigator.clipboard?.writeText(text ?? consoleModal.content)}
       />
     </div>
   );

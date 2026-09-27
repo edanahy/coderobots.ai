@@ -736,8 +736,8 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     setCurrentConsoleContent('');
   };
 
-  const handleCopyConsole = () => {
-    navigator.clipboard.writeText(currentConsoleContent);
+  const handleCopyConsole = (text = currentConsoleContent) => {
+    navigator.clipboard.writeText(text);
     closeConsoleModal();
   };
 
