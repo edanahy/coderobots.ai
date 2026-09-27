@@ -1,12 +1,17 @@
-import { useRef, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { cpp } from '@codemirror/lang-cpp';
 import { EditorView } from '@codemirror/view';
 
-const CodeEditor = forwardRef(({ initialCode = '# Start your project here!\n', onChange, language = 'python' }, ref) => {
+const CodeEditor = forwardRef(({ initialCode = '# Start your project here!\n', onChange, onPaste, language = 'python' }, ref) => {
   const editorViewRef = useRef(null);
   const codeRef = useRef(initialCode);
+  // Read through a ref so the (per-render) extension always calls the latest.
+  const onPasteRef = useRef(onPaste);
+  useEffect(() => {
+    onPasteRef.current = onPaste;
+  });
 
   useImperativeHandle(ref, () => ({
     getCode: () => {
@@ -50,7 +55,15 @@ const CodeEditor = forwardRef(({ initialCode = '# Start your project here!\n', o
           '.cm-line': {
             fontWeight: 'bold',
           }
-        })
+        }),
+        // Runs before CodeMirror inserts the text (returning false lets the
+        // paste proceed); the resulting onChange follows synchronously.
+        EditorView.domEventHandlers({
+          paste: (event) => {
+            onPasteRef.current?.(event.clipboardData?.getData('text/plain') || '');
+            return false;
+          },
+        }),
       ]}
       onChange={handleChange}
       onCreateEditor={(view) => {

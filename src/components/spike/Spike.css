@@ -1,0 +1,459 @@
+/* SPIKE Prime: connection chooser, hub chip, REPL/Slots toggle */
+
+.spike-icon {
+  width: 1.05em;
+  height: 1.05em;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.spike-editor .spike-connect-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.right-panel .spike-ble-button {
+  background-color: #1f5bd6;
+}
+
+.right-panel .spike-ble-button:hover:not(:disabled) {
+  background-color: #1849ad;
+}
+
+.spike-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid #c9d2dc;
+  background: #f3f6fa;
+  color: #1f2933;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.spike-chip--usb .spike-icon { color: #26823b; }
+.spike-chip--ble .spike-icon { color: #1f5bd6; }
+
+.spike-chip-name {
+  font-weight: 600;
+}
+
+.spike-chip-battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #3b4652;
+}
+
+.spike-battery-glyph {
+  position: relative;
+  width: 18px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.spike-battery-glyph::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  width: calc(var(--level, 0%) - 2px);
+  max-width: calc(100% - 2px);
+  background: #26823b;
+  border-radius: 1px;
+}
+
+.spike-battery-glyph::after {
+  content: '';
+  position: absolute;
+  right: -3.5px;
+  top: 1.5px;
+  width: 2px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+}
+
+.spike-chip-battery--low { color: #a33a3a; }
+.spike-chip-battery--low .spike-battery-glyph::before { background: #a33a3a; }
+
+.spike-chip-state {
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: #e3e7ec;
+  color: #52606d;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.spike-chip-state--running {
+  background: #dff3e4;
+  color: #1e6b31;
+}
+
+.spike-chip-state--running::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: #26823b;
+  animation: spikePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes spikePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.spike-mode-toggle {
+  display: inline-flex;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.spike-mode-toggle button {
+  padding: 0.45rem 0.8rem;
+  border: none;
+  background: #ffffff;
+  color: #3b4652;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spike-mode-toggle button + button {
+  border-left: 1px solid #b8c2cc;
+}
+
+.spike-mode-toggle button.active {
+  background: #1f2933;
+  color: #ffffff;
+  cursor: default;
+}
+
+.spike-mode-toggle button:disabled:not(.active) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spike-mode-toggle button:hover:not(:disabled) {
+  background: #eef1f4;
+}
+
+.right-panel .spike-primary-action {
+  font-weight: 600;
+}
+
+.right-panel .spike-sensors-toggle.active {
+  background-color: #1f2933;
+  color: #ffffff;
+}
+
+.spike-progress {
+  font-size: 0.85rem;
+  color: #52606d;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sensor panel */
+
+.spike-sensor-panel {
+  flex: 0 0 272px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f8fafc;
+  font-size: 0.8rem;
+  color: #1f2933;
+}
+
+.spike-sensor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.spike-sensor-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #c9d2dc;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #52606d;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.spike-sensor-empty {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.spike-sensor-hub {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.spike-display {
+  display: grid;
+  grid-template-columns: repeat(5, 11px);
+  gap: 3px;
+  padding: 6px;
+  border-radius: 6px;
+  background: #1f2933;
+  flex-shrink: 0;
+}
+
+.spike-display span {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #ffffff;
+}
+
+.spike-imu {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.5rem;
+  margin: 0;
+}
+
+.spike-imu dt {
+  color: #6b7280;
+}
+
+.spike-imu dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.spike-port-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.spike-port {
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d5dce3;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.spike-port--empty {
+  background: transparent;
+  border-style: dashed;
+  color: #9aa5b1;
+}
+
+.spike-port-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.spike-port-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #1f2933;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.spike-port--empty .spike-port-letter {
+  background: #c9d2dc;
+}
+
+.spike-port-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.spike-port-value {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.spike-port-detail {
+  color: #6b7280;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.spike-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.spike-swatch--none {
+  background: repeating-linear-gradient(45deg, #e5e7eb, #e5e7eb 2px, #ffffff 2px, #ffffff 4px);
+}
+
+.spike-matrix3 {
+  display: grid;
+  grid-template-columns: repeat(3, 12px);
+  gap: 2px;
+}
+
+.spike-badge {
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #1f2933;
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+/* Save as Library dialog */
+
+.spike-library-modal h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.spike-library-description {
+  margin: 0 0 1.25rem 0;
+  color: #52606d;
+  line-height: 1.45;
+}
+
+.spike-library-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.spike-library-input-row {
+  display: flex;
+  align-items: center;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+}
+
+.spike-library-input-row:focus-within {
+  border-color: var(--brand-accent, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.spike-library-prefix {
+  padding: 0.6rem 0.5rem;
+  background: #f3f6fa;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.spike-library-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.4rem;
+  border: none;
+  outline: none;
+  font: inherit;
+}
+
+.spike-library-hint,
+.spike-library-warning,
+.spike-library-error {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85rem;
+}
+
+.spike-library-hint { color: #52606d; }
+.spike-library-hint code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: #f3f6fa;
+}
+.spike-library-warning { color: #8a5a00; }
+.spike-library-error { color: #a33a3a; }
+
+.spike-library-existing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #52606d;
+}
+
+.spike-library-existing em {
+  color: #9aa5b1;
+}
+
+.spike-library-chip {
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #c9d2dc;
+  border-radius: 999px;
+  background: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.spike-library-chip.active {
+  border-color: #1f2933;
+  background: #1f2933;
+  color: #ffffff;
+}
+
+.spike-library-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.spike-library-cancel {
+  flex: 0 0 auto;
+  padding: 12px 20px;
+  border: 1px solid #c9d2dc;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spike-library-actions .modal-close-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

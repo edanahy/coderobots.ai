@@ -209,17 +209,22 @@ Append-only history of code edits and significant events. Every meaningful chang
 | `init` | `sessionManager.createNewSession` | First code row created with the session |
 | `tab_create` | `sessionManager.createCode` | User opened a new code tab |
 | `live_edit` | Debounced autosave (1s) in `SessionContext` | User typed and the editor flushed |
+| `paste_code` | `SPIKEEditor` code editor, any platform | Code right after something was pasted into the editor (not from an AI response — see `paste_ai_code`) |
+| `paste_ai_code` | `SPIKEEditor` code editor, any platform | Code right after pasting text that appears in an AI chat response (Copy button or a manual selection) — see the attribution note below |
 | `manual_save` | `App.jsx` Save button | User explicitly hit Save |
 | `chat_context` | `ChatPanel` when attaching code to a prompt | Snapshot taken so the message context is reproducible |
 | `ai_replace` | `App.jsx` `handleReplaceCode`, via `ChatPanel`'s code-block "Replace" button | Captures the state right after an AI-generated replacement |
-| `run_device` | `SPIKEEditor` Run button (serial platforms, LEGO, Arduino) | Code as it was when sent to the hardware |
+| `run_device` | `SPIKEEditor` Run button (serial platforms, LEGO, Arduino), and SPIKE "Download and Run" (slot mode / Bluetooth) | Code as it was when sent to the hardware (serial platforms and SPIKE: exactly the code sent) |
 | `save_to_main_py` | `SPIKEEditor` (Pico / ESP32 MicroPython) | Saved code as `main.py` on the device |
-| `save_to_slot_<n>` | `SPIKEEditor` (SPIKE) | Saved code to program slot `<n>` (0–19) to run autonomously on the hub |
+| `save_to_slot_<n>` | `SPIKEEditor` (SPIKE "Download", slot mode over USB or Bluetooth) | Saved code to program slot `<n>` (0–19) to run autonomously on the hub |
+| `save_to_library` | `SPIKEEditor` (SPIKE "Save as Library", USB REPL mode) | Code tab saved to the hub as `/flash/lib/<name>.py` (the module name is in the matching `save_to_library_<name>` interaction) |
 | `download_to_microbit` | `SPIKEEditor` (micro:bit / Cutebot) | Flashed code to the micro:bit |
 
 > Indexes `idx_code_snapshots_code_id`, `idx_code_snapshots_session_id`, and `idx_code_snapshots_timestamp` exist to make history lookups cheap.
 
 **Known limitation:** an `ai_replace` snapshot has no foreign key back to the specific `messages` row whose code block was inserted — correlation across the two tables is timestamp-only. A `replace_ai_code` row in `interactions` (below) marks that the Replace button was clicked at that moment, but doesn't identify *which* AI message either.
+
+**`paste_ai_code` attribution is a heuristic:** the pasted text is compared (whitespace-insensitively) against the AI responses loaded in that browser tab since the page was opened — every conversation the student viewed, not only the open one. Pastes shorter than 12 non-space characters never count as AI (a variable name matches AI text by coincidence too often), and AI code the student edited somewhere else before pasting counts as `paste_code`. Both paste snapshots hold the code *after* the paste; the `live_edit` snapshot that follows a second later usually repeats it.
 
 ---
 
@@ -243,12 +248,15 @@ Captures of the xterm.js terminal output.
 | `init` | `sessionManager.createNewSession` | Empty console row created with the session |
 | `manual_save` | `App.jsx` Save button | User explicitly hit Save |
 | `chat_context` | `ChatPanel` when attaching console output to a prompt | Capture so the prompt context is reproducible |
-| `run_device` | `SPIKEEditor`, when a run finishes (REPL prompt returns) | Full console buffer at the moment a run completed |
-| `disconnect` | `SPIKEEditor`, on manual Disconnect **and** on the auto-disconnect triggered by switching to a session on a different platform | Buffer captured right before the device connection is torn down |
-| `reset_device` | `SPIKEEditor` Reset button | Buffer captured right before a soft reset |
+| `run_device` | `SPIKEEditor`, when a run ends: the REPL prompt returns, or — SPIKE slot mode / Bluetooth — the hub reports the program stopped (including programs started with the hub's own button). SPIKE also captures it when the app cuts a run short (Run again, switching REPL⇄Slots, Save as Library) | Full console buffer at the moment a run completed |
+| `disconnect` | `SPIKEEditor`, on manual Disconnect (USB or SPIKE Bluetooth) **and** on the auto-disconnect triggered by switching to a session on a different platform | Buffer captured right before the device connection is torn down |
+| `connection_lost` | `SPIKEEditor` (SPIKE only), when the link drops without the app asking: USB cable pulled, hub switched off, Bluetooth out of range | Buffer captured right before it's cleared. Other platforms don't capture anything in this case |
+| `reset_device` | `SPIKEEditor` Reset button, or Ctrl-D typed into the SPIKE REPL | Buffer captured right before a soft reset |
 | `clear_console` | `SPIKEEditor` Clear Console button | Captures the buffer right before clearing |
 
 Non-`chat_context` writes also update the parent session's `current_console_id` and `last_updated`.
+
+**Terminal control codes in `content`:** the app's own status lines (SPIKE "Downloading to slot…", "▶ Program started", ESP32 "Compiling…") are coloured in the live terminal only and stored as plain text. Device output is stored exactly as received, so it can contain terminal control codes — notably MicroPython's REPL line editing, which sends backspace + `ESC[K` for ⌫ and `ESC[nD` redraws for arrow-key edits. The in-app viewers (`/users` "View console", chat's console view, `/view-data` replay) render these the way the terminal showed them (`src/utils/consoleText.js` `renderTerminalText`), but the raw `/data` CSV export does not. Captures from before 2026-09-26 may also contain the colour codes of SPIKE/ESP32 status lines (`ESC[36m…ESC[0m`).
 
 **Console output between capture points is not logged incrementally** — only at the discrete moments above. A student running code many times in a row without triggering Save/Reset/Disconnect/Clear between runs will still get one full capture per run (each `run_device` capture happens when that run finishes), but truly continuous "everything printed, moment to moment" isn't captured; only the accumulated buffer at each of those moments is.
 
@@ -256,7 +264,9 @@ Non-`chat_context` writes also update the parent session's `current_console_id` 
 
 ## `interactions`
 
-Toolbar/button/session-lifecycle click events. Pure analytics — no payload beyond which action occurred, though several `button_name` values embed a specific target (board id, platform id, model name, slot number) the same way `connect_<board>` always has.
+Toolbar/button/session-lifecycle click events — plus, for SPIKE Prime, the *outcomes* of those clicks and events the hub itself reports (all prefixed `spike_`; see the SPIKE section below). Pure analytics — no payload beyond which action occurred, though several `button_name` values embed a specific target (board id, platform id, model name, slot number, library name) the same way `connect_<board>` always has.
+
+`timestamp` is set by the database when the row is inserted. `SPIKEEditor` (which logs every hardware event, including SPIKE's) writes its interactions one at a time in the order they happen, so for those rows `timestamp` and `id` order match the real sequence even for events milliseconds apart (a short program's start and end). Rows from different tables (`interactions` vs `console` vs `code_snapshots`) written at the same moment can still interleave by a few milliseconds.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -270,7 +280,7 @@ Toolbar/button/session-lifecycle click events. Pure analytics — no payload bey
 
 | Value | Trigger |
 |---|---|
-| `connect_<board>` | Connect button, where `<board>` is the target board id (`pico`, `microbit`, `esp32`, `spike`) |
+| `connect_<board>` | Connect button, where `<board>` is the target board id (`pico`, `microbit`, `esp32`, `spike`). Logged on click, before the port picker. For SPIKE, `connect_spike` is "Connect via USB" |
 | `connect_lego` | LEGO device connect (inside the BLE device picker) |
 | `connect_esp32_arduino` | ESP32 (C++/Arduino) connect |
 | `open_lego_picker` | LEGO "Connect Hardware" button (opens the BLE device picker) |
@@ -281,12 +291,79 @@ Toolbar/button/session-lifecycle click events. Pure analytics — no payload bey
 | `reset_device` | Soft reset |
 | `clear_console` | Clear console |
 | `save_to_main_py` | Save as `main.py` on Pico/ESP32 MicroPython |
-| `save_to_slot_<n>` | SPIKE "Save to Slot", slot `<n>` (0–19) |
-| `switch_to_repl_mode` | SPIKE REPL⇄Program-Slot toggle → REPL mode |
-| `switch_to_program_slot_mode` | SPIKE REPL⇄Program-Slot toggle → Program-Slot mode |
 | `clear_main_esp32` | Clear ESP32 MicroPython main file |
 | `clear_download_microbit` | Clear queued micro:bit download |
 | `download_to_microbit` | Flash code to micro:bit |
+
+### `button_name` values — SPIKE Prime (`SPIKEEditor` + `components/spike/useSpikeHub.js`)
+
+SPIKE connects over **USB** (lands in the MicroPython **REPL**; a toggle switches to **Slots** = LEGO Hub OS) or **Bluetooth** (Hub OS only). Clicks are logged when clicked; the `spike_*` rows record what actually happened. `run_device`, `send_ctrl_c`, `reset_device`, `clear_console` and `disconnect` (table above) also apply to SPIKE. Names are defined in `src/utils/spike/runLog.js` (run lifecycle) and at the call sites.
+
+**Connection**
+
+| Value | Trigger |
+|---|---|
+| `connect_spike` | "Connect via USB" clicked |
+| `connect_spike_ble` | "Connect via Bluetooth" clicked (before the browser's device picker) |
+| `spike_connected_usb` / `spike_connected_ble` | Connection established (USB lands in REPL mode; Bluetooth in Hub OS) |
+| `spike_connect_failed_usb` / `spike_connect_failed_ble` | Connection attempt failed — including a cancelled picker |
+| `spike_connection_lost_usb` / `spike_connection_lost_ble` | Link dropped without the app asking (cable pulled, hub off, out of range); a `connection_lost` console capture goes with it. A manual Disconnect logs `disconnect` instead |
+
+**Mode (USB only)**
+
+| Value | Trigger |
+|---|---|
+| `switch_to_program_slot_mode` | REPL⇄Slots toggle → Slots (soft-reboots the hub into Hub OS) |
+| `spike_slot_mode_failed` | The hub didn't come up in Hub OS; the app stays in REPL mode |
+| `switch_to_repl_mode` | REPL⇄Slots toggle → REPL |
+
+**REPL (USB)**
+
+| Value | Trigger |
+|---|---|
+| `run_device` / `send_ctrl_c` / `reset_device` | Run Program / Stop Program / Reset Device buttons (see the run lifecycle below) |
+| `spike_repl_command` | Enter pressed (or a multi-line paste) in the terminal — a line typed straight into the REPL. The text itself is in the console captures |
+| `spike_repl_interrupt` | Ctrl-C typed in the terminal |
+| `spike_repl_soft_reset` | Ctrl-D typed in the terminal (soft reset; the app returns the hub to the REPL a second later) |
+| `save_to_library_<name>` | "Save as Library" saved `/flash/lib/<name>.py` (with a `save_to_library` code snapshot) |
+| `spike_library_save_failed` | Save as Library failed |
+
+**Slots / Hub OS (USB Slots mode or Bluetooth)**
+
+| Value | Trigger |
+|---|---|
+| `save_to_slot_<n>` | "Download" to slot `<n>` (0–19), without running it (with a `save_to_slot_<n>` code snapshot) |
+| `download_and_run_slot_<n>` | "Download and Run" on slot `<n>` (with a `run_device` code snapshot) |
+| `spike_download_failed_slot_<n>` | The download to slot `<n>` failed |
+| `spike_run_start_failed_slot_<n>` | Downloaded, but the hub refused to start slot `<n>` |
+| `stop_slot_program` | Stop Program clicked |
+| `open_hub_sensors` / `close_hub_sensors` | Sensors panel opened / closed |
+
+**Run lifecycle (all modes)** — every run is logged as one start followed by one end:
+
+| Value | Meaning |
+|---|---|
+| `spike_run_started_repl` | Editor code started in the REPL (follows its `run_device` click) |
+| `spike_run_started_app` | Slot program started by "Download and Run" (follows its `download_and_run_slot_<n>`) |
+| `spike_run_started_hub` | Slot program started with **the hub's own button** while connected — no app click precedes it |
+| `spike_run_ended` | Finished on its own. In Slots mode, also a stop with the hub's button (the hub doesn't say which) |
+| `spike_run_error` | Ended with an uncaught exception (a traceback other than `KeyboardInterrupt` in that run's output) |
+| `spike_run_stopped` | Stopped from the app: Stop, Reset, Run again, a new download while it ran, switching REPL⇄Slots, or Save as Library |
+
+Each end comes with a `run_device` console capture (`reset_device` for Reset / typed Ctrl-D).
+
+**Reading the run stream (research recipes):**
+- *How many test iterations?* Count `spike_run_started_*`.
+- *Changing code between runs, or re-running the same code?* Compare each run's code with the previous run's: REPL runs and "Download and Run" each have a `run_device` snapshot (exactly the code sent; same `code_id` = same tab). A `spike_run_started_hub` re-runs whatever was last downloaded, so a string of those with no download in between is the same code run over and over — the "download once, then adjust the robot" pattern.
+- *Software problem-solving?* Look for `spike_run_error` → edits (`live_edit`, `paste_*`, `ai_replace` snapshots) → next run.
+- *Where did the code come from?* `live_edit` (typed), `paste_code`, `paste_ai_code` / `replace_ai_code` (AI), and the chat `messages` in between.
+
+**Known limitations:**
+- Nothing is visible while the hub is disconnected (downloaded to a slot, unplugged, run from the hub).
+- For `spike_run_started_hub` the hub doesn't report *which* slot ran.
+- A run still going at `disconnect` / `spike_connection_lost_*` gets no end event: the program keeps running on the hub, out of sight.
+- `spike_run_error` needs a printed traceback: a program that catches its own errors, or misbehaves without crashing, is `spike_run_ended`.
+- `spike_repl_command` counts lines, not statements: each line of a block typed in paste mode (Ctrl-E) counts once.
 
 ### `button_name` values — session/conversation/code-tab lifecycle (`SessionContext`)
 
@@ -307,7 +384,7 @@ Centralized here rather than in each UI component (`TitleBar`/`CodeTabs`/`ChatTa
 | `rename_code_tab` | Code tab renamed |
 | `close_code_tab` | Code tab closed (soft delete — see `code.deleted_at`). Closing the *active* tab logs a `switch_code_tab` to its neighbour first |
 
-### `button_name` values — chat (`ChatPanel`) and save (`App.jsx`)
+### `button_name` values — chat (`ChatPanel`), code editor, and save (`App.jsx`)
 
 | Value | Trigger |
 |---|---|
@@ -315,9 +392,11 @@ Centralized here rather than in each UI component (`TitleBar`/`CodeTabs`/`ChatTa
 | `switch_model_<model_name>` | Model picker changed to `<model_name>` (direct mode only — no picker in tutor mode) |
 | `copy_ai_code` | "Copy" clicked on an AI code block |
 | `replace_ai_code` | "Replace" clicked on an AI code block (also creates an `ai_replace` code snapshot — see above) |
+| `paste_code` | Text pasted into the code editor (any platform), not found in an AI response; with a `paste_code` snapshot |
+| `paste_ai_code` | Text pasted into the code editor that appears in an AI chat response; with a `paste_ai_code` snapshot (heuristic — see the note under `code_snapshots`) |
 | `manual_save` | TitleBar "Save Session" clicked |
 
-**Not instrumented, deliberately:** the "Add Code to Chat" / "Add Console to Chat" toggle buttons and the SPIKE slot-selector dropdown are not logged on every click — the meaningful outcome (which context was actually attached to a *sent* message; which slot was actually *saved to*) is already captured elsewhere, and logging every toggle/browse would mostly add noise.
+**Not instrumented, deliberately:** the "Add Code to Chat" / "Add Console to Chat" toggle buttons, the SPIKE slot-selector dropdown, and opening/cancelling the SPIKE "Save as Library" dialog are not logged — the meaningful outcome (which context was actually attached to a *sent* message; which slot or library was actually *saved to*) is already captured elsewhere, and logging every toggle/browse would mostly add noise. Keystrokes in the SPIKE REPL other than Enter / Ctrl-C / Ctrl-D aren't logged (the typed text is in the console captures). The sensor panel hiding itself when leaving Slots mode isn't a `close_hub_sensors`.
 
 ---
 

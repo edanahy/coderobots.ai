@@ -12,6 +12,7 @@ import { logMessage, logConsole, logInteraction } from '../services/dataLogger';
 import { streamChatCompletionWithBudget, streamTutorCompletion } from '../utils/chatStream';
 import { getUserAccessLevel, getDailyBudgetUsage } from '../services/aiUsage';
 import { fetchModelMetadata, pickInitialModel } from '../services/aiModels';
+import { rememberAiText } from '../utils/aiCodeTracker';
 import instance from '../config/instance';
 import { 
   LEVEL_INSTRUCTION_PREFIX,
@@ -134,6 +135,13 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
       setMessages([]);
     }
   }, [conversationHistory]);
+
+  // Let the code editor tell AI-sourced pastes (paste_ai_code) from others.
+  useEffect(() => {
+    for (const message of messages) {
+      if (message.role === 'bot' && !message.streaming) rememberAiText(message.content);
+    }
+  }, [messages]);
 
   // Scroll to bottom when messages change, but only if the user is already near the bottom
   useEffect(() => {
@@ -728,8 +736,8 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
     setCurrentConsoleContent('');
   };
 
-  const handleCopyConsole = () => {
-    navigator.clipboard.writeText(currentConsoleContent);
+  const handleCopyConsole = (text = currentConsoleContent) => {
+    navigator.clipboard.writeText(text);
     closeConsoleModal();
   };
 
