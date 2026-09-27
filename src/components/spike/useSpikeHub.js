@@ -22,6 +22,7 @@ import {
   requestSpikeBleDevice,
 } from '../../utils/spike/bleTransport.js';
 import { listLibraries, saveLibrary } from '../../utils/spike/replLibrary.js';
+import { RUN_OUTPUT_LIMIT, SPIKE_RUN, runEndEvent } from '../../utils/spike/runLog.js';
 import { createLegoTerminal } from '../../utils/legoEducation/legoTerminal.js';
 
 // Sensor panel open: fast updates. Closed: a slow heartbeat so the battery
@@ -31,6 +32,11 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 
 const SLOT_STORAGE_KEY = 'coderobots_spike_slot';
 const SLOT_COUNT = 20;
+
+// The hub confirms a start/stop we requested within milliseconds; a program
+// start/stop notification with no request of ours in this window came from
+// the hub itself (its button, or the program finishing).
+const APP_ACTION_WINDOW_MS = 5000;
 
 // Match the USB (microRepl Board) terminal's light theme set in SPIKEEditor.
 const BLE_TERMINAL_THEME = {
@@ -98,6 +104,14 @@ export default function useSpikeHub(options) {
   const bleTerminalRef = useRef(null);
   const atLineStartRef = useRef(true);
   const bleDisconnectedRef = useRef(() => {});
+  // Run logging (Hub OS): when we last asked the hub to start/stop a program,
+  // and the output of the current run (for error detection).
+  const appStartAtRef = useRef(0);
+  const appStopAtRef = useRef(0);
+  const runOutputRef = useRef('');
+  // Set before we close the BLE link ourselves, so the disconnect handler can
+  // tell a manual disconnect from a lost connection.
+  const bleClosingRef = useRef(false);
 
   const setTransportBoth = (value) => { transportRef.current = value; setTransport(value); };
   const setModeBoth = (value) => { modeRef.current = value; setMode(value); };
@@ -134,16 +148,39 @@ export default function useSpikeHub(options) {
 
   // --- protocol client -----------------------------------------------------
 
+  const requestedRecently = (ref) => Date.now() - ref.current < APP_ACTION_WINDOW_MS;
+
+  // Every Hub OS program start/stop the hub reports is logged — including
+  // ones started with the hub's own button — so "download once, run many
+  // times" shows up as repeated spike_run_started_hub events.
   const handleProgramFlow = (running) => {
     setHubRunningBoth(running);
     emitLine(dim(running ? t('spikeProgramStarted') : t('spikeProgramEnded')));
+    if (running) {
+      const byApp = requestedRecently(appStartAtRef);
+      appStartAtRef.current = 0;
+      runOutputRef.current = '';
+      void opt().logInteraction(byApp ? SPIKE_RUN.STARTED_APP : SPIKE_RUN.STARTED_HUB);
+      return;
+    }
+    const stopped = requestedRecently(appStopAtRef);
+    appStopAtRef.current = 0;
+    void opt().logInteraction(runEndEvent({ stopped, output: runOutputRef.current }));
+    runOutputRef.current = '';
     // A program ending is the Hub OS equivalent of the REPL prompt returning.
-    if (!running) opt().logConsole(opt().getConsole(), 'run_device');
+    opt().logConsole(opt().getConsole(), 'run_device');
+  };
+
+  const handleHubConsole = (text) => {
+    if (hubRunningRef.current) {
+      runOutputRef.current = (runOutputRef.current + text).slice(-RUN_OUTPUT_LIMIT);
+    }
+    emit(text);
   };
 
   const startClient = async (link) => {
     const client = new SpikeHubClient(link, {
-      onConsole: emit,
+      onConsole: handleHubConsole,
       onProgramFlow: handleProgramFlow,
       onDevice: setDeviceState,
     });
@@ -227,6 +264,7 @@ export default function useSpikeHub(options) {
       emitLine(cyan(t('spikeSlotModeReady')));
     } catch (error) {
       console.error('[SPIKE] entering slot mode failed:', error);
+      void opt().logInteraction('spike_slot_mode_failed');
       detachClient();
       linkRef.current?.close();
       linkRef.current = null;
@@ -253,6 +291,12 @@ export default function useSpikeHub(options) {
     void opt().logInteraction('switch_to_repl_mode');
 
     try {
+      // Ctrl-C below kills a running slot program without a stop
+      // notification (the client is detached first), so close the run here.
+      if (hubRunningRef.current) {
+        void opt().logInteraction(SPIKE_RUN.STOPPED);
+        void opt().logConsole(opt().getConsole(), 'run_device');
+      }
       try { await clientRef.current?.setDeviceNotifications(0); } catch { /* leaving anyway */ }
       detachClient();
       linkRef.current?.close();
@@ -262,6 +306,11 @@ export default function useSpikeHub(options) {
       const { stopCode } = opt();
       if (stopCode) await board.paste(stopCode, { hidden: true });
       setModeBoth('repl');
+      atLineStartRef.current = false; // the Board wrote the banner, not emit()
+      emitLine(cyan(t('spikeReplModeReady')));
+      // The REPL banner can land inside the hidden steps above (e.g. when a
+      // program was still running), so ask for a visible prompt.
+      await board.write('\r');
       atLineStartRef.current = false;
       board.terminal?.focus();
     } catch (error) {
@@ -293,6 +342,7 @@ export default function useSpikeHub(options) {
       device = await requestSpikeBleDevice();
     } catch (error) {
       setBusyBoth(null);
+      void opt().logInteraction('spike_connect_failed_ble'); // includes a cancelled picker
       setStatusBanner(error?.name === 'NotFoundError'
         ? { type: 'info', message: t('errNoDeviceSelected') }
         : { type: 'error', message: t('errConnectionFailed').replace('{message}', error?.message || String(error)) });
@@ -314,10 +364,12 @@ export default function useSpikeHub(options) {
       setTransportBoth('ble');
       setModeBoth('hub');
       opt().setConnected(true);
+      void opt().logInteraction('spike_connected_ble');
       atLineStartRef.current = true;
       emitLine(cyan(t('spikeBleConnected').replace('{name}', device.name || 'SPIKE Prime')));
     } catch (error) {
       console.error('[SPIKE] Bluetooth connection failed:', error);
+      void opt().logInteraction('spike_connect_failed_ble');
       detachClient();
       transportRef.current = null;
       linkRef.current = null;
@@ -336,6 +388,12 @@ export default function useSpikeHub(options) {
   // Hub switched off, out of range, or our own disconnect.
   const handleBleDisconnected = () => {
     if (transportRef.current !== 'ble') return;
+    if (!bleClosingRef.current) {
+      // Not initiated in the app: capture the console before it's cleared.
+      void opt().logInteraction('spike_connection_lost_ble');
+      void opt().logConsole(opt().getConsole(), 'connection_lost');
+    }
+    bleClosingRef.current = false;
     linkRef.current = null;
     detachClient();
     disposeBleTerminal();
@@ -353,6 +411,7 @@ export default function useSpikeHub(options) {
     if (transportRef.current !== 'ble' || busyRef.current === 'uploading') return;
     await opt().logInteraction('disconnect');
     await opt().logConsole(opt().getConsole(), 'disconnect');
+    bleClosingRef.current = true;
     await linkRef.current?.close(); // fires handleBleDisconnected
   };
 
@@ -363,6 +422,10 @@ export default function useSpikeHub(options) {
     return () => {
       if (transportRef.current === 'ble') {
         const link = linkRef.current;
+        // Same record as SPIKEEditor's platform-switch disconnect for USB.
+        void opt().logInteraction('disconnect');
+        void opt().logConsole(opt().getConsole(), 'disconnect');
+        bleClosingRef.current = true;
         bleDisconnectedRef.current();
         link?.close().catch(() => {});
       }
@@ -380,12 +443,15 @@ export default function useSpikeHub(options) {
 
     setBusyBoth('uploading');
     setUploadProgress(0);
+    let uploaded = false;
     try {
-      await opt().createSnapshot(run ? 'run_device' : `save_to_slot_${targetSlot}`);
+      // Snapshot exactly the code being sent.
+      await opt().createSnapshot(run ? 'run_device' : `save_to_slot_${targetSlot}`, code);
       await opt().logInteraction(run ? `download_and_run_slot_${targetSlot}` : `save_to_slot_${targetSlot}`);
 
       // The hub won't take a new program while one is running.
       if (hubRunningRef.current) {
+        appStopAtRef.current = Date.now();
         await client.stopProgram(targetSlot);
         await sleep(150);
       }
@@ -396,10 +462,18 @@ export default function useSpikeHub(options) {
       await client.uploadFile(targetSlot, 'program.py', bytes, (sent, total) => {
         setUploadProgress(total ? Math.round((sent / total) * 100) : 100);
       });
+      uploaded = true;
       emitLine(green(t('spikeDownloaded').replace('{slot}', targetSlot).replace('{size}', formatBytes(bytes.length))));
-      if (run) await client.startProgram(targetSlot);
+      if (run) {
+        appStartAtRef.current = Date.now();
+        await client.startProgram(targetSlot);
+      }
     } catch (error) {
       console.error('[SPIKE] download failed:', error);
+      appStartAtRef.current = 0;
+      void opt().logInteraction(uploaded
+        ? `spike_run_start_failed_slot_${targetSlot}`
+        : `spike_download_failed_slot_${targetSlot}`);
       emitLine(red(t('spikeDownloadFailed').replace('{message}', error?.message || String(error))));
     } finally {
       setBusyBoth(null);
@@ -411,16 +485,18 @@ export default function useSpikeHub(options) {
     const client = clientRef.current;
     if (!client) return;
     void opt().logInteraction('stop_slot_program');
+    appStopAtRef.current = Date.now();
     try {
       // The hub stops whatever is running regardless of the slot given.
       await client.stopProgram(slot);
     } catch (error) {
+      appStopAtRef.current = 0;
       emitLine(red(error?.message || String(error)));
     }
   };
 
   const toggleSensors = () => {
-    if (!sensorsOpenRef.current) void opt().logInteraction('open_hub_sensors');
+    void opt().logInteraction(sensorsOpenRef.current ? 'close_hub_sensors' : 'open_hub_sensors');
     setSensorsOpen((open) => !open);
   };
 
@@ -450,8 +526,9 @@ export default function useSpikeHub(options) {
     setLibrary((state) => ({ ...state, saving: true, error: '' }));
     try {
       const code = opt().getCode() || '';
-      await opt().createSnapshot('save_to_library');
-      await opt().logInteraction('save_to_library');
+      await opt().createSnapshot('save_to_library', code);
+      // Module names are validated identifiers, safe to embed like slot numbers.
+      await opt().logInteraction(`save_to_library_${name}`);
       opt().onReplRunReset();
       const path = await saveLibrary(board, name, code);
       setLibrary({ open: false, existing: null, saving: false, error: '' });
@@ -459,6 +536,7 @@ export default function useSpikeHub(options) {
       await board.write('\r'); // fresh >>> prompt under the message
       atLineStartRef.current = false;
     } catch (error) {
+      void opt().logInteraction('spike_library_save_failed');
       setLibrary((state) => ({ ...state, saving: false, error: error?.message || String(error) }));
     } finally {
       opt().operationInFlightRef.current = false;

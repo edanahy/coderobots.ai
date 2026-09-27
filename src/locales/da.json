@@ -192,6 +192,7 @@
   "spikeModeSlotsHint": "LEGO Hub OS: download programmer til pladser, kør dem herfra eller fra hubben, og se sensorer live",
   "spikeEnteringSlotMode": "Genstarter hubben i programplads-tilstand…",
   "spikeSlotModeReady": "Programplads-tilstand er klar — vælg en plads, og tryk på Download og kør.",
+  "spikeReplModeReady": "REPL-tilstand er klar — skriv kode herunder, eller tryk på Kør program.",
   "spikeSlotModeFailed": "Kunne ikke skifte til programplads-tilstand ({message}). Bliver i REPL-tilstand.",
   "selectProgramSlot": "Programplads på hubben",
   "slotOption": "Plads {n}",

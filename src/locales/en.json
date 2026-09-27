@@ -192,6 +192,7 @@
   "spikeModeSlotsHint": "LEGO Hub OS: download programs to slots, run them from here or the hub, and see live sensors",
   "spikeEnteringSlotMode": "Restarting the hub in Slot mode…",
   "spikeSlotModeReady": "Slot mode ready — choose a slot, then Download and Run.",
+  "spikeReplModeReady": "REPL mode ready — type code below or press Run Program.",
   "spikeSlotModeFailed": "Couldn't switch to Slot mode ({message}). Staying in REPL mode.",
   "selectProgramSlot": "Program slot on the hub",
   "slotOption": "Slot {n}",

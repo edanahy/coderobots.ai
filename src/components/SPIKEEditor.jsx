@@ -35,6 +35,8 @@ import {
 import { ESP32_USB_FILTERS, findAuthorizedEsp32SerialPort } from '../utils/esp32/esp32UsbFilters.js';
 import { compileSketch, Esp32CompileError } from '../utils/esp32/esp32Compile.js';
 import { PURGE_USER_MODULES } from '../utils/spike/replLibrary.js';
+import { RUN_OUTPUT_LIMIT, SPIKE_RUN, runEndEvent } from '../utils/spike/runLog.js';
+import { isFromAi } from '../utils/aiCodeTracker.js';
 import CodeEditor from './CodeEditor.jsx';
 import ControlPanel from './ControlPanel.jsx';
 import CodeTabs from './CodeTabs.jsx';
@@ -140,14 +142,31 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+  // SPIKE REPL run being logged (start → end event): its output so far (for
+  // error detection) and whether the app asked it to stop.
+  const replRunRef = useRef({ active: false, output: '', stopRequested: false });
+  // Set before we close the serial port ourselves, so ondisconnect can tell a
+  // manual disconnect from a lost connection (cable pulled, hub off).
+  const manualDisconnectRef = useRef(false);
+  // Set by the editor's paste handler; the onChange that follows logs it.
+  const pendingPasteRef = useRef(null);
 
-  const logInteractionSafe = async (action) => {
-    if (!sessionIdRef.current) return;
-    try {
-      await logInteraction(action, sessionIdRef.current);
-    } catch (error) {
-      console.warn(`Failed to log interaction (${action}):`, error);
-    }
+  // The database timestamps interactions on insert, so rapid events (a short
+  // run's start and end, a re-run's stop and start) could otherwise land out
+  // of order. Chain the writes so rows appear in the order things happened.
+  const interactionQueueRef = useRef(Promise.resolve());
+  const logInteractionSafe = (action) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return Promise.resolve();
+    const write = interactionQueueRef.current.then(async () => {
+      try {
+        await logInteraction(action, sessionId);
+      } catch (error) {
+        console.warn(`Failed to log interaction (${action}):`, error);
+      }
+    });
+    interactionQueueRef.current = write;
+    return write;
   };
 
   const logConsoleSafe = async (content, action) => {
@@ -167,7 +186,17 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     if (pendingRunSaveRef.current && bufferRef.current.endsWith('>>> ')) {
       pendingRunSaveRef.current = false;
       logConsoleSafe(bufferRef.current, 'run_device');
+      endReplRun(false);
     }
+  };
+
+  // SPIKE REPL: close the run being logged with its outcome event (stopped by
+  // the app, ended with a traceback, or finished). No-op when none is open.
+  const endReplRun = (stopped) => {
+    const run = replRunRef.current;
+    if (!run.active) return;
+    replRunRef.current = { active: false, output: '', stopRequested: false };
+    void logInteractionSafe(runEndEvent({ stopped: stopped || run.stopRequested, output: run.output }));
   };
 
   // Mirror app-generated output into the console buffer (run logging, the
@@ -186,7 +215,13 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     appendOutput,
     setConnected,
     setStatusBanner,
+    // A REPL operation (mode switch, library save) is about to interrupt
+    // whatever is running.
     onReplRunReset: () => {
+      if (replRunRef.current.active) {
+        logConsoleSafe(bufferRef.current, 'run_device');
+        endReplRun(true);
+      }
       pendingRunSaveRef.current = false;
       setIsRunning(false);
     },
@@ -288,6 +323,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     });
     logInteractionSafe('disconnect');
     logConsoleSafe(bufferRef.current, 'disconnect');
+    manualDisconnectRef.current = true;
     board.disconnect().catch((error) => {
       console.error('Failed to auto-disconnect after platform switch:', error);
     });
@@ -565,6 +601,23 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   const handleCodeChange = (newCode) => {
     isLocalChangeRef.current = true;
     updateCurrentCodeContent(newCode);
+    // A paste just landed: log it, with a snapshot of the resulting code.
+    const pasteKind = pendingPasteRef.current;
+    if (pasteKind) {
+      pendingPasteRef.current = null;
+      void createSnapshot(pasteKind, newCode);
+      void logInteractionSafe(pasteKind);
+    }
+  };
+
+  // Editor paste (fires just before the text is inserted): attribute it to
+  // the AI when the pasted text appears in an AI chat response.
+  const handleCodePaste = (text) => {
+    if (!text) return;
+    pendingPasteRef.current = isFromAi(text) ? 'paste_ai_code' : 'paste_code';
+    // The resulting onChange is synchronous; a paste that changed nothing
+    // mustn't tag a later edit.
+    setTimeout(() => { pendingPasteRef.current = null; }, 0);
   };
 
   // Initialize board on mount
@@ -584,6 +637,14 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         },
         ondisconnect: () => {
           console.log('Device disconnected');
+          // SPIKE: a disconnect the app didn't initiate (cable pulled, hub
+          // switched off) — capture the console before it's cleared.
+          if (!manualDisconnectRef.current && spikeRef.current?.transport === 'usb') {
+            logInteractionSafe('spike_connection_lost_usb');
+            logConsoleSafe(bufferRef.current, 'connection_lost');
+          }
+          manualDisconnectRef.current = false;
+          replRunRef.current = { active: false, output: '', stopRequested: false };
           setIsConnecting(false);
           setConnected(false);
           setConnectedBoard(null);
@@ -622,6 +683,8 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
           // Update buffer (FIFO). bufferRef is authoritative; state mirrors it.
           bufferRef.current = (bufferRef.current + chunk).slice(-FIFO_SIZE);
           setBuffer(bufferRef.current);
+          const run = replRunRef.current;
+          if (run.active) run.output = (run.output + chunk).slice(-RUN_OUTPUT_LIMIT);
 
           // If a run was dispatched, a returned prompt means it finished — save
           // the console tail (checks the accumulated buffer, not just this chunk).
@@ -631,6 +694,31 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
           if (chunk.includes('>>> ')) {
             setTimeout(() => setIsRunning(false), 100);
           }
+        },
+        // SPIKE REPL: lines typed (or pasted) straight into the terminal.
+        oninput: (chunk) => {
+          if (spikeRef.current?.transport !== 'usb') return;
+          if (chunk.includes('\x03')) {
+            if (replRunRef.current.active) replRunRef.current.stopRequested = true;
+            logInteractionSafe('spike_repl_interrupt');
+          } else if (/[\r\n]/.test(chunk)) {
+            logInteractionSafe('spike_repl_command');
+          }
+        },
+        // Ctrl-D typed in the terminal (the Board has already sent it).
+        onsoftreset: () => {
+          if (spikeRef.current?.transport !== 'usb') return;
+          logInteractionSafe('spike_repl_soft_reset');
+          logConsoleSafe(bufferRef.current, 'reset_device');
+          endReplRun(true);
+          pendingRunSaveRef.current = false;
+          setIsRunning(false);
+          // A soft reboot starts Hub OS on SPIKE; come back to the REPL the
+          // way the Reset button does.
+          setTimeout(() => {
+            const board = boardRef.current;
+            if (board?.connected) board.interrupt();
+          }, 1000);
         },
         theme: {
           background: '#ffffff',
@@ -763,6 +851,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       await logInteractionSafe('disconnect');
       await logConsoleSafe(bufferRef.current, 'disconnect');
       if (isSpikeMode) await spike.prepareUsbDisconnect();
+      manualDisconnectRef.current = true;
       await board.disconnect();
     }
     finally {
@@ -931,12 +1020,16 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         }
       } else if (targetBoard === 'spike') {
         await connectSpike(board);
+        // connect_spike above is the click; this is the outcome.
+        void logInteractionSafe('spike_connected_usb');
       } else {
         await connectPico(board);
       }
       setConnectedPlatformId(activePlatform?.id || null);
     } catch (error) {
       console.error('Connection failed:', error);
+      // Includes a cancelled port picker.
+      if (targetBoard === 'spike') void logInteractionSafe('spike_connect_failed_usb');
       setConnected(false);
       setConnectedBoard(null);
       setConnectedPlatformId(null);
@@ -1029,8 +1122,19 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
 
     try {
       const codeToRun = editorRef.current?.getCode() || currentCodeContent;
+      const isSpikeRepl = connectedBoard === 'spike';
 
-      await createSnapshot('run_device');
+      // SPIKE: re-running before the last run finished stops it. Close it out
+      // now, and disarm its pending save, so the new paste's own `>>> `
+      // echoes can't be mistaken for the new run ending.
+      if (isSpikeRepl && (replRunRef.current.active || pendingRunSaveRef.current)) {
+        if (pendingRunSaveRef.current) logConsoleSafe(bufferRef.current, 'run_device');
+        pendingRunSaveRef.current = false;
+        endReplRun(true);
+      }
+
+      // Snapshot exactly the code being sent.
+      await createSnapshot('run_device', codeToRun);
       await logInteractionSafe('run_device');
 
       if (isRunning) {
@@ -1042,8 +1146,10 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
       try {
         // SPIKE: forget modules imported from /flash so a library saved
         // since the last run is re-imported instead of served from cache.
-        if (connectedBoard === 'spike') await board.paste(PURGE_USER_MODULES, { hidden: true });
+        if (isSpikeRepl) await board.paste(PURGE_USER_MODULES, { hidden: true });
+        if (isSpikeRepl) replRunRef.current = { active: true, output: '', stopRequested: false };
         await board.paste(codeToRun, { hidden: false });
+        if (isSpikeRepl) void logInteractionSafe(SPIKE_RUN.STARTED_REPL);
         // Code is now fully sent (paste-mode echoes are done). Arm the save so
         // the returning `>>> ` prompt — the program finishing — saves the console.
         pendingRunSaveRef.current = true;
@@ -1053,6 +1159,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         setTimeout(maybeSaveRunConsole, 200);
       } catch (error) {
         console.error('Run failed:', error);
+        replRunRef.current = { active: false, output: '', stopRequested: false };
         setIsRunning(false);
       }
     } finally {
@@ -1092,6 +1199,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
     operationInFlightRef.current = true;
 
     try {
+      if (replRunRef.current.active) replRunRef.current.stopRequested = true;
       await logInteractionSafe('send_ctrl_c');
       await stopRunningCode();
     } finally {
@@ -1122,6 +1230,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
 
     await logInteractionSafe('reset_device');
     await logConsoleSafe(bufferRef.current, 'reset_device');
+    endReplRun(true);
 
     // We've saved the console here; don't let the reset's own `>>> ` prompt
     // trigger a duplicate run_device save.
@@ -1306,6 +1415,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
               ref={editorRef}
               initialCode={currentCodeContent}
               onChange={handleCodeChange}
+              onPaste={handleCodePaste}
               language={activePlatform?.editorLanguage || 'python'}
             />
           </div>

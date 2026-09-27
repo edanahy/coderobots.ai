@@ -180,6 +180,8 @@ const style = (target, value, property) => (
  * @prop {() => void} [onportselected]
  * @prop {(error:Error) => void} [onerror=console.error]
  * @prop {(buffer:Uint8Array) => void} [ondata]
+ * @prop {(chunk:string) => void} [oninput] keystrokes/pastes typed into the terminal and sent to the board
+ * @prop {() => void} [onsoftreset] the user pressed Ctrl-D in the terminal (soft reset)
  * @prop {{ background:string, foreground:string }} [theme]
  */
 
@@ -223,6 +225,8 @@ export default function Board({
   onportselected = options.onportselected,
   onerror = options.onerror,
   ondata = options.ondata,
+  oninput = noop,
+  onsoftreset = noop,
   onresult = parse,
   theme = options.theme,
 } = options) {
@@ -452,6 +456,7 @@ export default function Board({
                     accumulator = '';
                   }
                   board.reset();
+                  onsoftreset();
                   return false;
                 }
               }
@@ -470,7 +475,10 @@ export default function Board({
         });
 
         terminal.onData(chunk => {
-          if (!evaluating && writer && !rawReceiver) writer.write(chunk);
+          if (!evaluating && writer && !rawReceiver) {
+            writer.write(chunk);
+            oninput(chunk);
+          }
         });
 
         fitAddon = new FitAddon;

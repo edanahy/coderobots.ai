@@ -115,7 +115,7 @@ Sessions are the top-level unit. Each session has:
 - A **hardware_platform** chosen at creation — determines connection type, stop code, and AI priming
 - Multiple **conversations** (chat tabs) — one is "current"
 - Multiple **code records** (code tabs) — one is "current"
-- **Code snapshots**, **console logs**, and **interactions** (button/session/conversation/code-tab lifecycle events) logged automatically at key events
+- **Code snapshots**, **console logs**, and **interactions** (button/session/conversation/code-tab lifecycle events) logged automatically at key events — including editor pastes, attributed to the AI (`paste_ai_code`) when the text appears in a chat response (`src/utils/aiCodeTracker.js`, fed by `ChatPanel`)
 
 `DATA_COLLECTION.md` is the authoritative, maintained reference for exactly
 which events are logged, the full `save_source`/`button_name` value lists,
@@ -210,6 +210,11 @@ Bluetooth"; disconnecting (or the hub dropping) returns there.
   hub drops frames written in one burst, so the client sends
   `maxPacketSize` (512) packets 5 ms apart. After Ctrl-D, Hub OS needs
   ~1.5–2 s before it answers the handshake.
+- **Research logging:** every run, in any mode, is logged as one
+  `spike_run_started_{repl,app,hub}` + one `spike_run_{ended,error,stopped}`
+  interaction (`src/utils/spike/runLog.js`; hub-button runs come from Hub OS
+  ProgramFlow notifications), plus connect/lost/failure outcomes. Keep the
+  SPIKE section of `DATA_COLLECTION.md` in sync when adding SPIKE actions.
 
 ### Per-User Hardware Configuration (LilyBot)
 
