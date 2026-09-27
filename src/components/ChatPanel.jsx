@@ -239,6 +239,11 @@ const ChatPanel = ({ onReplaceCode, getCodeContent, getConsoleContent }) => {
 
   useEffect(() => {
     refreshDailyUsage();
+    // Intentionally keyed on the values refreshDailyUsage reads, not on the function: it's
+    // re-created every render and sets state, so listing it would re-fetch usage from Supabase
+    // on every render, forever. The rule is off for the deps line, so if refreshDailyUsage
+    // starts reading another prop/state value, add that value to the deps by hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: deps are the values refreshDailyUsage reads; listing the function itself would loop
   }, [userAccessLevel]);
 
   const handleModelChange = (model) => {

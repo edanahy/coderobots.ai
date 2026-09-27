@@ -441,6 +441,10 @@ class LegoDevice {
 
   async _sendAndWait(cmdBytes, responseId, deserializer, timeout = 5000) {
     const key = responseId;
+    // Keep every await (and anything else that can throw) inside the try/catch below that calls
+    // reject(err): an async executor swallows errors thrown outside it, so callers would only see
+    // a timeout, or a hang. LEGO BLE protocol code: don't restructure without a device to test on.
+    // eslint-disable-next-line no-async-promise-executor -- the only await is wrapped in try/catch that rejects
     return new Promise(async (resolve, reject) => {
       const timer = setTimeout(() => { this._removePending(key, entry); reject(new Error(`Timeout waiting for response 0x${responseId.toString(16)}`)); }, timeout);
       const entry = { resolve: (p) => { clearTimeout(timer); resolve(deserializer ? deserializer(p) : p); }, reject: (e) => { clearTimeout(timer); reject(e); } };
@@ -452,6 +456,10 @@ class LegoDevice {
 
   async _sendAndWaitMotor(cmdBytes, responseId, motorBitMask, deserializer, timeout = 5000) {
     const key = `${responseId}:${motorBitMask}`;
+    // Keep every await (and anything else that can throw) inside the try/catch below that calls
+    // reject(err): an async executor swallows errors thrown outside it, so callers would only see
+    // a timeout, or a hang. LEGO BLE protocol code: don't restructure without a device to test on.
+    // eslint-disable-next-line no-async-promise-executor -- the only await is wrapped in try/catch that rejects
     return new Promise(async (resolve, reject) => {
       const timer = setTimeout(() => { this._removePending(key, entry); reject(new Error(`Timeout waiting for motor response 0x${responseId.toString(16)} motor=${motorBitMask}`)); }, timeout);
       const entry = { resolve: (p) => { clearTimeout(timer); resolve(deserializer ? deserializer(p) : p); }, reject: (e) => { clearTimeout(timer); reject(e); } };
