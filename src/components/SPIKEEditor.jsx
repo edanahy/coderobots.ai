@@ -624,6 +624,12 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
   };
 
   // Initialize board on mount
+  // Runs once. The Board keeps these callbacks' first-render closures for its whole life (the
+  // boardRef guard stops any re-creation), so everything they read, directly or through the
+  // helpers they call (maybeSaveRunConsole, endReplRun, logInteractionSafe, logConsoleSafe),
+  // must be a ref or module-scope value, never props/state/context: e.g. t via tRef, sessionId
+  // via sessionIdRef. Adding deps won't refresh them, and re-creating the Board would orphan the
+  // live serial connection.
   useEffect(() => {
     if (!boardRef.current) {
       boardRef.current = new Board({
@@ -729,6 +735,7 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
         }
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time Board setup; its callbacks (and the helpers they call) read refs only, see note above this effect
   }, []);
 
   // Notify other panels (e.g. ChatPanel's "Add Console to Chat" button) when the

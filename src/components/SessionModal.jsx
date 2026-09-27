@@ -23,14 +23,6 @@ const SessionModal = ({ visible, sessions, onSelect, onCreateNew, cancellable = 
     onSelect?.(sessionId);
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  };
-
   const formatLastUpdated = (dateString) => {
     const date = new Date(dateString);
     const now = new Date();

@@ -8,7 +8,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import './ModalBase.css';
 import './BudgetErrorModal.css';
 
-const BudgetErrorModal = ({ visible, onClose, accessLevel, premiumModels = [], nonPremiumModels = [] }) => {
+const BudgetErrorModal = ({ visible, onClose, accessLevel, nonPremiumModels = [] }) => {
   const { t } = useLanguage();
   useEffect(() => {
     if (!visible) return;

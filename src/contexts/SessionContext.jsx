@@ -294,7 +294,12 @@ export const SessionProvider = ({ children }) => {
     setPendingPlatformSession(null);
     await loadSessions();
     return await setActiveSessionById(sessionId);
-  }, [loadSessions]);  // eslint-disable-line react-hooks/exhaustive-deps
+    // Created once (loadSessions never changes), so this calls the first-render
+    // setActiveSessionById, whose save-before-switch sees empty state and is
+    // skipped. Harmless today because the setActiveSessionById call that raised
+    // the platform picker already saved. Real fix + test plan: ROADMAP.md R20.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- known stale closure, harmless today; fix is ROADMAP R20 (see comment above)
+  }, [loadSessions]);
 
   const clearPendingPlatformSession = useCallback(() => {
     setPendingPlatformSession(null);

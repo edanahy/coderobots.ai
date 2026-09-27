@@ -5,7 +5,7 @@
  * programming. It mirrors the structure of spike_priming.js.
  */
 
-// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line no-unused-vars -- keeps the shared buildPriming(hardwareConfig) signature; only LilyBot reads the config
 export function buildMicrobitPriming(hardwareConfig) {
   return microbitPriming;
 }

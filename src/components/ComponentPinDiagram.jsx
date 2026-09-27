@@ -93,6 +93,12 @@ const ComponentPinDiagram = ({
       });
     });
     return map;
+    // resolveMpuPinId/getMpuPinName read only mpuPinByKey (via resolveMpuPin), so it stands in for
+    // them: keep it listed even though the body never names it, and don't list the helpers
+    // (re-created every render, they'd defeat the memo). activeMpuPinId/hoveredMpuPinId aren't
+    // read (harmless extra recomputes). The rule is off for the deps line: if the helpers start
+    // reading another value, add that value here by hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- helpers derive only from mpuPinByKey, already listed
   }, [mappings, instanceId, componentPinIdByKey, mpuPinByKey, activeMpuPinId, hoveredMpuPinId]);
 
   if (!resolvedSvgRaw) {

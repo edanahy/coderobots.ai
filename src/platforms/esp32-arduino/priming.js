@@ -172,7 +172,7 @@ Serial er USB-forbindelsen tilbage til browserens terminal.
 - Only the allowed libraries: Wire, Adafruit_Sensor, Adafruit_ADXL345_U, Adafruit_GFX, Adafruit_SSD1306.
 `;
 
-// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line no-unused-vars -- keeps the shared buildPriming(hardwareConfig) signature; only LilyBot reads the config
 export function buildEsp32ArduinoPriming(hardwareConfig) {
   return ESP32_ARDUINO_PRIMING;
 }
