@@ -11,7 +11,7 @@
 
 // CSI (ESC [ … final byte), OSC (ESC ] … BEL or ESC \), and two-byte ESC codes.
 // Matching control characters is the point here.
-/* eslint-disable no-control-regex */
+/* eslint-disable no-control-regex -- ANSI escape sequences are control characters */
 const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 const ANSI_AT_START = /^(?:\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_])/;
 const TERMINAL_CONTROLS = /[\x1b\b\r]/;

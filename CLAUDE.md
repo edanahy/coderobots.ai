@@ -2,14 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-There may be other agents working in this file, do not make changes or fixes to files that you are not working on. There may be linter errors unrelated to your work, but do not fix those.
+There may be other agents working in this file, do not make changes or fixes to files that you are not working on.
+
+**Lint is clean and must stay clean.** `npm run lint` (ESLint with `--max-warnings 0`, plus the locale checks) passes on `dev`, and a change isn't done until it still does. Fix the problems your change introduces rather than silencing them. When silencing is genuinely right, put `// eslint-disable-next-line <rule> -- <reason>` directly above the line (or, for a few consecutive lines, a `/* eslint-disable <rule> -- <reason> */` … `/* eslint-enable <rule> */` pair). Never add a bare disable, one without a reason, or a file-wide one. Before changing code guarded by a disable comment, read its reason. Several guard deliberate patterns, e.g. hook dependency lists that would loop or rebuild state if "fixed". For `react-hooks/exhaustive-deps`, never resolve a warning by adding a plain component function (one not already wrapped in `useCallback`) to the deps, or by wrapping it in `useCallback` just to satisfy the rule: many such functions here are re-created every render and set state, so the hook would loop. List the values the function reads instead, and annotate the deps line. If lint flags a file you didn't touch, say so rather than fixing it, since that means something unexpected changed.
 
 ## Commands
 
 ```bash
 npm run dev        # Start Vite dev server
 npm run build      # Production build
-npm run lint       # ESLint + locale dictionary checks
+npm run lint       # ESLint (0 errors, 0 warnings) + locale dictionary checks
 npm run check:locales    # Locale key parity / dangling t() references only
 npm run preview    # Preview production build
 npm run generate:schema  # Regenerate Zod schemas from database

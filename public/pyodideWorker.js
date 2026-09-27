@@ -64,7 +64,7 @@ function syncRpc(reqJson) {
 self.LEGO_BRIDGE = { rpc: syncRpc };
 
 async function initPyodide(indexURL) {
-  // eslint-disable-next-line no-undef
+  // eslint-disable-next-line no-undef -- loadPyodide is a global defined by importScripts(pyodide.js) above
   pyodide = await loadPyodide({
     indexURL,
     stdout: (s) => self.postMessage({ type: 'stdout', data: s + '\n' }),
