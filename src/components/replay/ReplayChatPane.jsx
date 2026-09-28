@@ -151,6 +151,8 @@ const ReplayChatPane = ({ frame, profile }) => {
           onSwitchConversation={noop}
           onCreateConversation={noop}
           onRenameConversation={noop}
+          onCloseConversation={noop}
+          readOnly
         />
       )}
       {showChatTabs && frame?.chatTabSwitched && (
@@ -178,7 +180,7 @@ const ReplayChatPane = ({ frame, profile }) => {
         isOpen={consoleModal.open}
         consoleContent={consoleModal.content}
         onClose={() => setConsoleModal({ open: false, content: '' })}
-        onCopy={() => navigator.clipboard?.writeText(consoleModal.content)}
+        onCopy={(text) => navigator.clipboard?.writeText(text ?? consoleModal.content)}
       />
     </div>
   );

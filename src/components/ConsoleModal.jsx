@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { useLanguage } from '../contexts/LanguageContext';
+import { renderTerminalText } from '../utils/consoleText';
 import './ModalBase.css';
 import './ConsoleModal.css';
 
@@ -27,6 +28,10 @@ const ConsoleModal = ({ isOpen, consoleContent, onClose, onCopy }) => {
 
   if (!isOpen) return null;
 
+  // Stored captures can hold terminal escape codes (colours, REPL line
+  // editing); show — and copy — the text as the terminal displayed it.
+  const displayText = renderTerminalText(consoleContent);
+
   const handleBackdropClick = (e) => {
     if (e.target === modalRef.current) {
       onClose();
@@ -39,7 +44,7 @@ const ConsoleModal = ({ isOpen, consoleContent, onClose, onCopy }) => {
         <div className="console-header">{t('consoleOutput')}</div>
         <div className="console-editor-container">
           <CodeMirror
-            value={consoleContent}
+            value={displayText}
             height="100%"
             extensions={[
               EditorView.editable.of(false),
@@ -95,7 +100,7 @@ const ConsoleModal = ({ isOpen, consoleContent, onClose, onCopy }) => {
         </div>
         <div className="console-actions">
           <button data-act="cancel" onClick={onClose}>{t('cancel')}</button>
-          <button data-act="copy" onClick={onCopy}>{t('copy')}</button>
+          <button data-act="copy" onClick={() => onCopy?.(displayText)}>{t('copy')}</button>
         </div>
       </div>
     </div>

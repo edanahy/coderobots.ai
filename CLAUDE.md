@@ -2,14 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-There may be other agents working in this file, do not make changes or fixes to files that you are not working on. There may be linter errors unrelated to your work, but do not fix those.
+There may be other agents working in this file, do not make changes or fixes to files that you are not working on.
+
+**Lint is clean and must stay clean.** `npm run lint` (ESLint with `--max-warnings 0`, plus the locale checks) passes on `dev`, and a change isn't done until it still does. Fix the problems your change introduces rather than silencing them. When silencing is genuinely right, put `// eslint-disable-next-line <rule> -- <reason>` directly above the line (or, for a few consecutive lines, a `/* eslint-disable <rule> -- <reason> */` … `/* eslint-enable <rule> */` pair). Never add a bare disable, one without a reason, or a file-wide one. Before changing code guarded by a disable comment, read its reason. Several guard deliberate patterns, e.g. hook dependency lists that would loop or rebuild state if "fixed". For `react-hooks/exhaustive-deps`, never resolve a warning by adding a plain component function (one not already wrapped in `useCallback`) to the deps, or by wrapping it in `useCallback` just to satisfy the rule: many such functions here are re-created every render and set state, so the hook would loop. List the values the function reads instead, and annotate the deps line. If lint flags a file you didn't touch, say so rather than fixing it, since that means something unexpected changed.
 
 ## Commands
 
 ```bash
 npm run dev        # Start Vite dev server
 npm run build      # Production build
-npm run lint       # ESLint + locale dictionary checks
+npm run lint       # ESLint (0 errors, 0 warnings) + locale dictionary checks
 npm run check:locales    # Locale key parity / dangling t() references only
 npm run preview    # Preview production build
 npm run generate:schema  # Regenerate Zod schemas from database
@@ -66,7 +68,10 @@ instance: telemetry instances need `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
 and `VITE_MODAL_BUDGET_ENDPOINT_URL` (direct chat); tutor instances need
 `VITE_MODAL_TUTOR_ENDPOINT_URL`; instances offering the `esp32-arduino`
 platform need `VITE_ESP32_COMPILE_URL`. `VITE_INSTANCE` picks the instance
-config.
+config. `VITE_ENV_LABEL` (optional; set only for local dev and Vercel
+Preview, never Production) turns on the non-production frame/title/favicon
+indicator in `src/config/applyEnvBadge.js`; `VITE_ENV_COLOR` overrides its
+default orange.
 
 ## Architecture
 
@@ -112,7 +117,7 @@ Sessions are the top-level unit. Each session has:
 - A **hardware_platform** chosen at creation — determines connection type, stop code, and AI priming
 - Multiple **conversations** (chat tabs) — one is "current"
 - Multiple **code records** (code tabs) — one is "current"
-- **Code snapshots**, **console logs**, and **interactions** (button/session/conversation/code-tab lifecycle events) logged automatically at key events
+- **Code snapshots**, **console logs**, and **interactions** (button/session/conversation/code-tab lifecycle events) logged automatically at key events — including editor pastes, attributed to the AI (`paste_ai_code`) when the text appears in a chat response (`src/utils/aiCodeTracker.js`, fed by `ChatPanel`)
 
 `DATA_COLLECTION.md` is the authoritative, maintained reference for exactly
 which events are logged, the full `save_source`/`button_name` value lists,
@@ -156,7 +161,7 @@ Hardware platforms are registered in `src/platforms/index.js` and each lives in 
 - `esp32` → "ESP32 (MicroPython)", connectionType `esp32`, serial REPL, uses `postConnectFiles`
 - `esp32-arduino` → "ESP32 (C++/Arduino)", connectionType `esp32-arduino` (Modal compile + esptool-js flash, no REPL; `stopCode: null`, `editorLanguage: 'cpp'`, C++ `starterCode`)
 - `lego` → connectionType `lego-ble` (Web Bluetooth + Pyodide, no serial; `stopCode: null`)
-- `spike` → "LEGO SPIKE Prime", connectionType `spike`, serial REPL (same WebSerial/MicroPython-REPL protocol as `pico`/`esp32`/`microbit`, no special USB filters), SPIKE App 3 firmware only (no SPIKE 2 support); ported from the Fall 2025 EN1 Editor. Adds a REPL-mode ⇄ Program-Slot-mode toggle in `SPIKEEditor`/`ControlPanel` so code can be saved to run autonomously on the hub (slots 0-19, `/flash/program/<slot>/program.py`), untethered from the browser — no tutor-mode support
+- `spike` → "LEGO SPIKE Prime", connectionType `spike`, SPIKE App 3 firmware only (no SPIKE 2 support); ported from the Fall 2025 EN1 Editor. Connects over USB (WebSerial: MicroPython REPL ⇄ Hub OS "Slots" mode) or Bluetooth (Web Bluetooth: Hub OS only) — see "SPIKE Prime" below; no tutor-mode support
 
 `editorLanguage` ('cpp'; default python) switches the CodeMirror mode and the chat code-fence language; `starterCode` seeds new code tabs (threaded through `createNewSession({initialCode})`/`createCode`). `tutorHwMode` (microbit / esp32-arduino→`esp32` / lego) marks tutor-pipeline support; platforms without it are unsupported in `chat.mode: 'tutor'`. Note the tutor `esp32` prompt bundle (`modal_functions/prompts/esp32.py`) is Arduino C++ (SmartMotor), so it belongs to `esp32-arduino`, not the MicroPython platform. Instances gate the offered subset via `instance.platforms` (`getPlatform()` stays unfiltered so legacy sessions remain readable). When adding a new platform, drop a folder under `src/platforms/`, export the platform object, and register it in `src/platforms/index.js`.
 
@@ -186,6 +191,32 @@ COOP/COEP headers are set in `vite.config.js` (dev/preview) and `vercel.json`
 (prod); removing them breaks LEGO mode. The Pyodide worker boots lazily on
 first LEGO connect. Run dispatches to `pyodideRunner.runPython`; stop is
 `interruptPython()` + `stopAllMotion()`.
+
+The **SPIKE Prime** platform (`spike`) has its own control panel
+(`src/components/spike/SpikeControlPanel.jsx`, state in `useSpikeHub.js`)
+and two transports. Disconnected, it offers "Connect via USB" / "Connect via
+Bluetooth"; disconnecting (or the hub dropping) returns there.
+- **USB** reuses the microRepl `Board` and lands in the **REPL** (Run/Stop/
+  Reset, plus "Save as Library" → `/flash/lib/<name>.py`, importable from
+  REPL runs *and* slot programs). Runs first purge `/flash` modules from
+  `sys.modules` so edited libraries re-import. The **Slots** toggle soft-
+  reboots (Ctrl-D) into Hub OS; Ctrl-C drops back to the REPL.
+- **Hub OS** (USB Slots mode, or Bluetooth) speaks the LEGO SPIKE Prime
+  protocol (https://lego.github.io/spike-prime-docs/) — COBS-escaped, XOR
+  0x03, `0x02`-terminated frames — via `src/utils/spike/` (`cobs.js`,
+  `messages.js`, transport-agnostic `hubClient.js`, `boardTransport.js` for
+  USB via `Board.setRawReceiver`/`writeBytes`, `bleTransport.js` for GATT
+  service `FD02`). UI: slot 0–19, Download / Download and Run / Stop,
+  decoded `print()` output (ConsoleNotification), and a live Sensors panel
+  (DeviceNotification: ports A–F, IMU, 5×5 display, battery). Over USB the
+  hub drops frames written in one burst, so the client sends
+  `maxPacketSize` (512) packets 5 ms apart. After Ctrl-D, Hub OS needs
+  ~1.5–2 s before it answers the handshake.
+- **Research logging:** every run, in any mode, is logged as one
+  `spike_run_started_{repl,app,hub}` + one `spike_run_{ended,error,stopped}`
+  interaction (`src/utils/spike/runLog.js`; hub-button runs come from Hub OS
+  ProgramFlow notifications), plus connect/lost/failure outcomes. Keep the
+  SPIKE section of `DATA_COLLECTION.md` in sync when adding SPIKE actions.
 
 ### Per-User Hardware Configuration (LilyBot)
 

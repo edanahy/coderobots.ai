@@ -54,7 +54,7 @@ function AdminUsageDashboard() {
       return;
     }
     loadAnalytics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- these are loadAnalytics' inputs; it's recreated each render, so listing it would refetch forever
   }, [user, isAdmin, preset, customStartDate, customEndDate]);
 
   const chartData = useMemo(() => {

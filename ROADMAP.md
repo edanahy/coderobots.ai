@@ -727,3 +727,249 @@ security fix on its own first (small, urgent), or fold it into that
 redesign? Which assignment option (a/b/c) fits best? Should `camps` +
 `unlimited` really mean *no* cap at all, or should there always be some
 hard daily ceiling as a backstop?
+
+---
+
+## R16 — Let students reopen closed tabs
+
+**Status:** idea
+
+**Problem:** closing a code or chat tab (added 2026-09-25) is a soft delete —
+`code.deleted_at` / `conversations.deleted_at` get stamped and the tab is
+hidden — but there's no way back in the app. A student who closes the wrong
+tab (the hover "×" makes that easy, even with the confirm dialog) can only
+get it back by asking an admin to null out `deleted_at` in the Supabase SQL
+editor. On local-storage instances there's no admin path at all short of
+editing `coderobots_local_db_v1` by hand.
+
+**Why it matters:** code tabs hold student work; losing one to a misclick is
+the kind of thing that makes students distrust the tool. The data is all
+still there, so this is purely a UI gap.
+
+**Affected files:**
+- `src/contexts/SessionContext.jsx` — already keeps closed rows in state
+  (`conversations`/`codeRecords` hold everything; only `openConversations`/
+  `openCodeRecords` are exposed), so a "closed tabs" list is cheap to expose
+- both persistence adapters — a `reopenConversation`/`reopenCode` that sets
+  `deleted_at` back to `null` (the `update` grants already allow it)
+- `ChatTabs.jsx` / `CodeTabs.jsx` — somewhere to surface it
+- `DATA_COLLECTION.md` — a `reopen_*` interaction, and a note that
+  `deleted_at` can be cleared (so it's "last closed", not "closed forever")
+
+**Possible approach:** an undo toast for a few seconds after closing (least
+UI, covers the misclick case), and/or a "Recently closed" dropdown next to
+the `+` button (browser-style "reopen closed tab"). If this lands, the
+confirm dialog on close could probably go away.
+
+**Open questions:** undo toast, dropdown, or both? Should reopening restore
+the tab's original position (sort is by creation time, so it would), or put
+it at the end? Does research want to preserve the close→reopen history, in
+which case `deleted_at` alone isn't enough and it'd need the interactions
+log (or a separate closed/reopened event table)?
+
+---
+
+## R17 — Show tab closes in the session replay viewer
+
+**Status:** idea
+
+**Problem:** the replay viewer (`/view-data`) rebuilds tabs from the merged
+per-session CSV by tab *name* (`replayModel.js` `buildFrames`; canonical
+events carry no tab IDs). Closed tabs (2026-09-25) therefore stay in the
+replayed tab bar forever — the `close_code_tab` / `close_conversation`
+interaction rows appear as events, but they don't say *which* tab was closed
+(`interactions` has only `session_id` + `button_name`), so the replay can't
+remove it.
+
+**Why it matters:** a researcher watching a replay sees tabs the student
+could no longer see at that point, which misrepresents what their screen
+looked like (e.g. "why didn't they use the code in Code tab 2?" — because
+they'd closed it).
+
+**Affected files:**
+- `scripts/merge_sessions_to_csv.py` — could emit a synthetic "tab closed"
+  event per closed row using `code.deleted_at` / `conversations.deleted_at`
+  (both now in the `/data` export as "Closed At") and the row's name
+- `src/components/replay/formats/*` + `canonical.js` — a new event type
+- `src/components/replay/replayModel.js` — drop the tab from the frame's
+  tab list from that event onward
+- `ChatTabs` / `CodeTabs` already have a `readOnly` mode for replay
+
+**Possible approach:** the merge script route needs no DB or app change —
+`deleted_at` + `name` are enough to place a close event on the timeline.
+Tab names are unique among a session's default-named tabs (new `Chat N` /
+`Code tab N` names count closed tabs), but students can still rename two
+tabs to the same name, which name-keyed replay can't tell apart.
+
+**Open questions:** if R16 (reopen) lands, `deleted_at` only holds the
+*latest* close, so close/reopen/close sequences would need the interactions
+log to carry the tab id — worth adding a tab id to `interactions` then?
+Relatedly, see R12/R14 for other fields the replay viewer drops today.
+
+---
+
+## R18 — SPIKE Prime hub file management beyond "Save as Library"
+
+**Status:** idea
+
+**Problem:** the SPIKE platform (2026-09-26) has one file feature: "Save as
+Library" in USB REPL mode writes the current code tab to
+`/flash/lib/<name>.py`. As students write bigger projects they'll want to see
+and manage what's on the hub: which libraries exist, what's in each program
+slot, deleting stale files, and shipping helper modules over Bluetooth
+(where there is no REPL).
+
+**What's already known (verified on hub firmware 1.8.149 / MicroPython
+1.20):**
+- REPL runs and slot programs share `sys.path = ['', '.frozen', '/flash',
+  '/flash/lib']`; a slot program's cwd is its own `/flash/program/NN/`.
+- The LEGO protocol's `StartFileUploadRequest` accepts any file name (≤31
+  bytes) into a slot folder, and a slot program can `import` a sibling file
+  uploaded that way — so helper modules *can* travel over BLE, but only into
+  a slot folder, never `/flash/lib`. `ClearSlotRequest` removes the whole
+  folder.
+- `/flash` also holds system files (`boot.py`, `main.py`, `config/`,
+  `pybcdc.inf`, `README.txt`) that a browser must protect.
+- The REPL caches imports; runs already purge `/flash` modules first
+  (`PURGE_USER_MODULES` in `src/utils/spike/replLibrary.js`).
+
+**Ideas, roughly in order of value:**
+1. **Bundle tabs into a slot download** (works on USB slot mode *and* BLE):
+   a "include these tabs as modules" picker next to Download; each tab is
+   uploaded as `<module>.py` beside `program.py`.
+2. **Hub Files browser** (USB REPL only): tree of `/flash`, open a file into
+   a new code tab (needs `createNewCode({ name, content })` in
+   `SessionContext`), save a tab to any path, delete/rename/new folder,
+   system files read-only.
+3. **Save as Library from slot mode** over USB by hopping to the REPL and
+   back automatically (Ctrl-C … Ctrl-D, ~2 s).
+4. **Rename the hub** (`SetHubNameRequest`, id 22 — works over USB and BLE).
+
+**Affected files:** `src/utils/spike/replLibrary.js` (REPL file ops),
+`src/utils/spike/hubClient.js` (multi-file slot upload),
+`src/components/spike/*`, `SessionContext.jsx` (tab from file),
+`DATA_COLLECTION.md` (new `button_name`/`save_source` values).
+
+**Open questions:** should a bundled helper be a live copy of another tab
+(re-sent on every download), or a snapshot the student picks each time?
+Should library files show up somewhere in the session replay?
+
+---
+
+## R19 — Half-built features removed as dead code in the lint cleanup
+
+**Status:** idea
+
+**Problem:** the 2026-09-27 lint cleanup (`feature/lint-cleanup`) took ESLint
+from 48 problems to zero with no behavior change, partly by deleting code
+nothing used. Several of those deletions look like leftovers of features
+someone planned or half-built: props passed but never read, a helper nobody
+calls. Deleting them was right, since dead code misleads the next reader. The
+ideas behind them are worth keeping. Each is a candidate to bring back
+*properly wired*, not a commitment.
+
+**Recovering the old code:** the deletions are one commit, `16e4dfe`
+("Lint: delete provably unused code"). Run `git show 16e4dfe` to see them. The
+commit survives the merge into dev, because merges are merge commits, not
+squashes.
+
+**Items:**
+
+1. **"Attach documentation" toggle (direct chat).** `ChatConfiguration`
+   accepted `attachDocumentation` / `onAttachDocumentationChange`, but no
+   caller ever passed them (dead since the handoff import). Its header comment
+   still lists "documentation attachment". It was probably a switch to add the
+   platform's reference docs to the prompt. Tutor mode already routes doc
+   bundles server-side (`ClassifyDocs` in `modal_functions/pipeline/`), so a
+   direct-mode version would attach docs client-side during `ChatPanel`'s
+   priming assembly.
+   Files: `ChatConfiguration.jsx` (and its header comment), `ChatPanel.jsx`,
+   `src/platforms/*/priming.js`, locales.
+2. **Streaming status in the model picker.** `ChatConfiguration` received
+   `streamableByModel` and `selectedModelStreaming` but never used them. They
+   were likely meant to mark non-streaming models in the dropdown. `ChatPanel`
+   still derives `selectedModelStreaming` from `ai_models.streamable` and shows
+   a notice *after* a non-streaming model is picked. Marking them in the picker
+   would warn *before*.
+   Files: `ChatConfiguration.jsx`, `ChatPanel.jsx` (pass the two props again),
+   locales.
+3. **Usage-loading indicator.** `ChatPanel` tracks `dailyUsageLoading` and
+   still passes it to `ChatConfiguration`, which ignores it. So the usage ring
+   shows 0% until the budget fetch finishes, which briefly reads as "you've
+   used nothing". A spinner or dimmed ring while loading would fix that.
+   Files: `ChatConfiguration.jsx` (the prop already arrives), its CSS.
+4. **Premium models in the budget-exceeded modal.** `BudgetErrorModal`
+   accepted `premiumModels`, but it lists only the non-premium (unlimited)
+   models the student can still use. `src/services/aiModels.js` still computes
+   `premiumModels` (the `!unlimited` models), and nothing reads it now. The
+   modal could also say which models are used up for today.
+   Files: `BudgetErrorModal.jsx`, `ChatPanel.jsx` (pass
+   `premiumModels={modelMetadata.premiumModels}` again), `aiModels.js`,
+   locales. Overlaps R5 (budget model) and R6 (per-model visibility).
+5. **Per-snippet actions on AI Python code.** `ChatPanel` had an unused
+   `extractPythonSnippets(content, messageId)` that returned `{ code, key }`
+   for every Python block in a message. Render-time locals (`codeKey`,
+   `isPython`, `isBot`) built the same stable `msg-<messageId>-<console>-<code>`
+   keys. This looks like an old per-snippet feature, such as "Run" / "Insert
+   into editor" buttons on the bot's Python blocks, since replaced by the
+   single "View code snippet" modal. If revived, the stable keys matter for
+   logging which snippet a student used.
+   Files: `ChatPanel.jsx`, `SessionContext.jsx` (insert into a code tab),
+   `SPIKEEditor.jsx` (run), `DATA_COLLECTION.md`.
+6. **Board-specific connect logic.** `SPIKEEditor` passes
+   `boardType: 'microbit' | 'pico' | 'esp32' | 'spike'` to `Board.connect()`
+   in `src/utils/microRepl.js`, which never used it. The cleanup removed it
+   from the destructuring, but the callers still pass it. It could drive
+   per-board USB filters, baud rates, or post-connect steps. This is hardware
+   code, so test on real devices.
+   Files: `microRepl.js`, `SPIKEEditor.jsx`.
+7. **Exact timestamps in the session list.** `SessionModal` had an unused
+   `formatDate` (medium date plus short time). The list shows
+   `formatLastUpdated`'s relative or short-date form instead. The exact date
+   and time could return as a hover tooltip (`title`) on each row.
+   Files: `SessionModal.jsx`.
+8. **Empty effect in `BudgetErrorModal`** (not a lint issue, still in the code):
+   `useEffect(() => { if (!visible) return; }, [visible])` does nothing. It's
+   probably a placeholder for Esc-to-close or focus handling. Finish it, to
+   match the other modals, or delete it.
+   Files: `BudgetErrorModal.jsx`.
+
+**Open questions:** which of these are still wanted? #1 and #5 are real
+features that need design. #2, #3 and #7 are small UI polish. #4 depends on
+where R5/R6 land. #6 only matters if a board turns out to need different
+connect handling.
+
+---
+
+## R20 — `assignPlatformToSession` calls a stale `setActiveSessionById`
+
+**Status:** idea (latent; harmless today)
+
+**Problem:** in `SessionContext.jsx`, `assignPlatformToSession` is a
+`useCallback` with deps `[loadSessions]`. `loadSessions` never changes (it
+has `[]` deps), so the callback is created once and calls the *first-render*
+`setActiveSessionById`. That function's first step, "save current code before
+switching sessions", runs only if `currentCodeId`, `currentCodeContent` and
+`activeSession` are all set. On the first render `currentCodeId` and
+`activeSession` are still `null`, so on this path the save is silently
+skipped. Found while annotating lint directives on 2026-09-27. The
+`eslint-disable` comment above that deps line now explains it.
+
+**Why it matters:** today it's harmless. `assignPlatformToSession` runs only
+from the forced platform picker for a legacy (platform-less) session, and the
+`setActiveSessionById` call that raised that picker had already saved the
+code. But it works only by accident. If `setActiveSessionById` gains more
+state-dependent steps, or another caller appears, the stale copy would act on
+first-render state.
+
+**Affected files:** `src/contexts/SessionContext.jsx` only.
+
+**Possible approach:** add `setActiveSessionById` to the deps and drop the
+disable comment. `assignPlatformToSession` is called only from an event
+handler in `App.jsx`, and no effect depends on it, so recreating it more
+often can't loop. To test on dev: null out one session's `hardware_platform`,
+open that session, pick a platform, and confirm its code tab content
+survives.
+
+**Open questions:** do legacy platform-less sessions still exist in any live
+database? If not, the whole pending-platform path could be simplified.

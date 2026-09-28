@@ -4,9 +4,11 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import { applyBrand } from './config/applyBrand'
+import { applyEnvBadge } from './config/applyEnvBadge'
 import { LanguageProvider } from './contexts/LanguageContext'
 
 applyBrand()
+applyEnvBadge()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

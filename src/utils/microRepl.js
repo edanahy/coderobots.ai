@@ -180,6 +180,8 @@ const style = (target, value, property) => (
  * @prop {() => void} [onportselected]
  * @prop {(error:Error) => void} [onerror=console.error]
  * @prop {(buffer:Uint8Array) => void} [ondata]
+ * @prop {(chunk:string) => void} [oninput] keystrokes/pastes typed into the terminal and sent to the board
+ * @prop {() => void} [onsoftreset] the user pressed Ctrl-D in the terminal (soft reset)
  * @prop {{ background:string, foreground:string }} [theme]
  */
 
@@ -223,6 +225,8 @@ export default function Board({
   onportselected = options.onportselected,
   onerror = options.onerror,
   ondata = options.ondata,
+  oninput = noop,
+  onsoftreset = noop,
   onresult = parse,
   theme = options.theme,
 } = options) {
@@ -235,6 +239,10 @@ export default function Board({
   let resizeObserver = null;
   let name = 'unknown';
   let accumulator = '';
+  // When set, every incoming chunk goes here (raw bytes) instead of to the
+  // REPL/terminal handling, and terminal keystrokes are not forwarded. Used by
+  // SPIKE Prime's Hub OS mode, where the port carries binary protocol frames.
+  let rawReceiver = null;
   let aborter, dedent, readerClosed, writer, writerClosed;
 
   const promptReady = value => /(?:\r\n|\r|\n)>>> $/.test(value) || value.endsWith('>>> ');
@@ -284,6 +292,7 @@ export default function Board({
     evaluating = 0;
     showEval = false;
     resetting = false;
+    rawReceiver = null;
 
     try { if (aborter) aborter.abort('connect-failure'); } catch {}
     try { if (writer) await writer.close(); } catch {}
@@ -322,7 +331,7 @@ export default function Board({
      * @param {string | Element} target where the REPL shows its output or accepts its input.
      * @returns
      */
-    connect: async (target, named = true, { boardType = 'generic', serialPort = null } = {}) => {
+    connect: async (target, named = true, { serialPort = null } = {}) => {
       if (port) return board;
       if (typeof target === 'string') {
         target = (
@@ -364,7 +373,13 @@ export default function Board({
           },
         });
 
-        const tes = new TextEncoderStream;
+        // Like a TextEncoderStream, but raw Uint8Array writes (writeBytes)
+        // pass through untouched alongside the usual string writes.
+        const tes = new TransformStream({
+          transform(chunk, controller) {
+            controller.enqueue(typeof chunk === 'string' ? encoder.encode(chunk) : chunk);
+          },
+        });
         writerClosed = tes.readable.pipeTo(port.writable);
         writer = tes.writable.getWriter();
 
@@ -381,6 +396,10 @@ export default function Board({
 
         const writable = new WritableStream({
           write(chunk) {
+            if (rawReceiver) {
+              rawReceiver(chunk);
+              return;
+            }
             if (evaluating) {
               if (1 < evaluating)
                 accumulator += decoder.decode(chunk);
@@ -420,6 +439,8 @@ export default function Board({
 
         let pastMode = false;
         terminal.attachCustomKeyEventHandler(event => {
+          // No typing into a binary protocol stream.
+          if (rawReceiver) return false;
           const { type, code, composed, ctrlKey, shiftKey } = event;
           if (type === 'keydown') {
             if (composed && ctrlKey && !shiftKey) {
@@ -435,6 +456,7 @@ export default function Board({
                     accumulator = '';
                   }
                   board.reset();
+                  onsoftreset();
                   return false;
                 }
               }
@@ -453,7 +475,10 @@ export default function Board({
         });
 
         terminal.onData(chunk => {
-          if (!evaluating && writer) writer.write(chunk);
+          if (!evaluating && writer && !rawReceiver) {
+            writer.write(chunk);
+            oninput(chunk);
+          }
         });
 
         fitAddon = new FitAddon;
@@ -563,6 +588,7 @@ export default function Board({
         accumulator = '';
         evaluating = 0;
         showEval = false;
+        rawReceiver = null;
         try {
           if (aborter) aborter.abort('disconnect');
           if (writer) await writer.close().catch(() => {});
@@ -877,6 +903,23 @@ export default function Board({
     write: async code => {
       if (port && !evaluating) await writer.write(code);
       else onerror(reason('write', evaluating));
+    },
+
+    /**
+     * Route incoming bytes to `fn` (or back to the REPL/terminal with null).
+     * @param {((chunk: Uint8Array) => void) | null} fn
+     */
+    setRawReceiver: fn => {
+      rawReceiver = typeof fn === 'function' ? fn : null;
+    },
+
+    /**
+     * Write raw bytes to the port, bypassing text encoding.
+     * @param {Uint8Array} bytes
+     */
+    writeBytes: async bytes => {
+      if (port && writer) await writer.write(bytes);
+      else throw reason('write', evaluating);
     },
   };
 

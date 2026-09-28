@@ -69,17 +69,30 @@
   min-width: 0;
 }
 
-/* Edit button - visible only on tab hover */
-.code-tab-edit {
+/* Active tab: clicking the name renames it (click-to-edit hint) */
+.code-tab.active .code-tab-name {
+  cursor: text;
+}
+
+/* Read-only (session replay): tabs are display-only */
+.code-tab.read-only,
+.code-tab.read-only .code-tab-name {
+  cursor: default;
+}
+
+/* Close button - visible only on tab hover. Keeps its slot while hidden so
+   tabs don't change width on hover. */
+.code-tab-close {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  background: rgba(0, 0, 0, 0.08);
-  color: #555;
+  background: transparent;
+  color: #c62828;
   border: none;
   border-radius: 2px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -89,22 +102,25 @@
   opacity: 0;
 }
 
-.code-tab:hover .code-tab-edit {
+.code-tab:hover .code-tab-close,
+.code-tab-close:focus-visible {
   opacity: 1;
 }
 
-.code-tab-edit:hover {
-  background: rgba(0, 0, 0, 0.15);
-  color: #000;
+.code-tab-close:hover {
+  background: #c62828;
+  color: #fff;
 }
 
-.code-tab.active .code-tab-edit {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+/* Last remaining tab: greyed out, can't be closed */
+.code-tab-close.disabled {
+  color: #999;
+  cursor: not-allowed;
 }
 
-.code-tab.active .code-tab-edit:hover {
-  background: rgba(0, 0, 0, 0.12);
+.code-tab-close.disabled:hover {
+  background: transparent;
+  color: #999;
 }
 
 /* Tab input for editing */

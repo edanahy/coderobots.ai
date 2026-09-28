@@ -356,7 +356,7 @@ function AdminUserDetail() {
         isOpen={consoleModal.open}
         consoleContent={consoleModal.content}
         onClose={closeConsoleModal}
-        onCopy={() => navigator.clipboard?.writeText(consoleModal.content)}
+        onCopy={(text) => navigator.clipboard?.writeText(text ?? consoleModal.content)}
       />
     </div>
   );

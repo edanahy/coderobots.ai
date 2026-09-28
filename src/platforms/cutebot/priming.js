@@ -140,7 +140,7 @@ while True:
 [END OF EXAMPLE PROMPTS AND CODE/RESPONSES]
 `;
 
-// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line no-unused-vars -- keeps the shared buildPriming(hardwareConfig) signature; only LilyBot reads the config
 export function buildCutebotPriming(hardwareConfig) {
   return cutebotPriming;
 }

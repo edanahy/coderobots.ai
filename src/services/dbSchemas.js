@@ -92,6 +92,8 @@ export const conversationSchema = z.object({
   start_time: fields.timestamp,
   last_updated: fields.timestamp,
   name: z.string().optional().nullable().default('Unnamed Chat'),
+  // Soft delete: set when the student closes the tab; null = visible.
+  deleted_at: fields.timestampOptional,
 });
 
 /**
@@ -109,6 +111,7 @@ export const conversationInsertSchema = z.object({
 export const conversationUpdateSchema = z.object({
   name: z.string().optional(),
   last_updated: fields.timestamp.optional(),
+  deleted_at: fields.timestampOptional,
 }).partial();
 
 // ============================================================================
@@ -185,6 +188,8 @@ export const codeSchema = z.object({
   content: z.string().optional().nullable().default(''),
   save_source: z.string().min(1),
   name: z.string().optional().nullable().default('Code Tab'),
+  // Soft delete: set when the student closes the tab; null = visible.
+  deleted_at: fields.timestampOptional,
 });
 
 /**
@@ -205,6 +210,7 @@ export const codeUpdateSchema = z.object({
   content: z.string().optional(),
   save_source: z.string().optional(),
   name: z.string().optional(),
+  deleted_at: fields.timestampOptional,
 }).partial();
 
 // ============================================================================

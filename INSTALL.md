@@ -984,6 +984,7 @@ create table public.code (
   save_source text not null,
   session_id bigint not null,
   name text null default 'Code Tab'::text,
+  deleted_at timestamp with time zone null,  -- set when a student closes the tab; row is kept, just hidden
   constraint code_pkey1 primary key (id),
   constraint code_session_id_fkey1 foreign KEY (session_id) references sessions (id) on update CASCADE on delete RESTRICT,
   constraint code_user_id_fkey1 foreign KEY (user_id) references auth.users (id) on update CASCADE on delete RESTRICT
@@ -1022,6 +1023,7 @@ create table public.conversations (
   last_updated timestamp with time zone not null default now(),
   session_id bigint not null,
   name text null default 'Unnamed Chat'::text,
+  deleted_at timestamp with time zone null,  -- set when a student closes the tab; row is kept, just hidden
   constraint conversations_pkey primary key (id),
   constraint conversations_session_id_fkey foreign KEY (session_id) references sessions (id) on update CASCADE on delete RESTRICT,
   constraint conversations_user_id_fkey foreign KEY (user_id) references auth.users (id) on update CASCADE on delete RESTRICT
@@ -1459,6 +1461,20 @@ commit;
 >
 > alter table public.messages add column if not exists lang text null;
 > ```
+>
+> A later change let students **close** code and chat tabs. Closing is a
+> soft delete: the row (and all its code/messages) stays in the database for
+> research, and a `deleted_at` timestamp just hides it from the tab bar.
+> Run this **before** deploying a frontend version that has closable tabs —
+> the Data Extractor (`/data`) requests `deleted_at` by name and the close
+> button writes it, so both error on a project without the column. No
+> grant or policy changes are needed (the existing `update` grants in §11.9
+> already cover new columns, and students still can't hard-delete). Safely
+> re-runnable:
+> ```sql
+> alter table public.code          add column if not exists deleted_at timestamp with time zone null;
+> alter table public.conversations add column if not exists deleted_at timestamp with time zone null;
+> ```
 
 ### 11.11 — Setup verification query
 
@@ -1633,6 +1649,19 @@ context_fk_check as (
          case when confdeltype = 'n' then 'OK' else 'MISSING (§11.10)' end as status,
          ''::text as detail
   from pg_constraint where conname = 'messages_code_context_id_fkey'
+),
+column_check as (
+  select 'column: ' || c.tbl || '.' || c.col as check_name,
+         case when exists (
+           select 1 from information_schema.columns ic
+           where ic.table_schema = 'public' and ic.table_name = c.tbl and ic.column_name = c.col
+         ) then 'OK' else 'MISSING (§11.5 / §11.10 note)' end as status,
+         ''::text as detail
+  from (values
+    ('messages', 'lang'),
+    ('code', 'deleted_at'),
+    ('conversations', 'deleted_at')
+  ) as c(tbl, col)
 )
 select * from (
   select * from table_check
@@ -1654,6 +1683,7 @@ select * from (
   union all select * from default_privs_check
   union all select * from cascade_check
   union all select * from context_fk_check
+  union all select * from column_check
 ) as results
 order by (status = 'OK'), check_name;  -- problems first
 ```

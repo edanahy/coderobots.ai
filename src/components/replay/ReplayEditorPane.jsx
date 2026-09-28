@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react';
 import CodeTabs from '../CodeTabs';
 import ReplayCodeViewer from './ReplayCodeViewer';
+import { renderTerminalText } from '../../utils/consoleText';
 import '../SPIKEEditor.css';
 import './Replay.css';
 
@@ -64,6 +65,8 @@ const ReplayEditorPane = ({ frame, profile }) => {
           onSwitchCode={noop}
           onCreateCode={noop}
           onRenameCode={noop}
+          onCloseCode={noop}
+          readOnly
         />
       )}
       {showCodeTabs && frame.codeTabSwitched && (
@@ -110,7 +113,7 @@ const ReplayEditorPane = ({ frame, profile }) => {
 
         <div className={`terminal-wrapper replay-console-wrapper${isConsole ? ' replay-flash' : ''}`}>
           <pre className="replay-console" ref={consoleRef}>
-            {frame.consoleText || ''}
+            {renderTerminalText(frame.consoleText || '')}
           </pre>
         </div>
       </div>
