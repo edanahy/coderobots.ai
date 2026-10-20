@@ -1404,9 +1404,13 @@ const SPIKEEditor = forwardRef(({ sessionId }, ref) => {
           visible={spike.library.open}
           tabName={codeRecords.find((record) => record.id === currentCodeId)?.name}
           existing={spike.library.existing}
+          size={spike.library.size}
           saving={spike.library.saving}
+          progress={spike.library.progress}
+          cancelling={spike.library.cancelling}
           error={spike.library.error}
           onSave={spike.saveAsLibrary}
+          onCancelSave={spike.cancelLibrarySave}
           onClose={spike.closeLibrary}
         />
       )}

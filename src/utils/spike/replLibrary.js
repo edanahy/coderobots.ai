@@ -86,49 +86,258 @@ except OSError:
     .sort();
 }
 
-// Paste-mode lines are sent whole, so keep each base64 chunk modest.
-const BASE64_CHUNK = 2048;
+export const formatBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
 
-function toBase64(bytes) {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
+// Above this the dialog warns that the library is large. A rough guess, not
+// a measured limit: the hub compiles a module's source in RAM on import, and
+// big modules can raise MemoryError there even though saving works.
+export const LARGE_LIBRARY_BYTES = 24 * 1024;
+
+// The upload is many small base64 lines, several per paste. Two hub limits
+// shape it:
+//  - The hub drops bytes from a large single USB write. With one ~2 KB
+//    base64 line per paste, a 56 KB save kept only its final, ~1 KB line;
+//    Hub OS has the same limit (see hubClient.js). microRepl's exec() sends each
+//    line as one write with a 10 ms gap, so a line's length IS the burst
+//    size. 96 bytes is 128 base64 chars, about 140 bytes per write, the
+//    same size as the micro:bit-tested lines in postConnectFiles.js. Don't
+//    "speed this up" by going back to one long line per paste. LINE_BYTES
+//    must stay a multiple of 3 so every line decodes without padding.
+//  - A paste whose line arrives damaged fails as a whole (SyntaxError) or
+//    stops at that line, and Board.paste() hides the traceback. So each
+//    paste here goes through readPrint and must answer with the file's new
+//    size; a missing or wrong answer means resend from the size that landed.
+//    That resume is only safe because each line also carries its decoded
+//    length and refuses to write if it doesn't match: a line that lost
+//    exactly 4 base64 chars still decodes, just 3 bytes short. With the
+//    check, the file only ever holds whole, good lines.
+const LINE_BYTES = 96;
+const LINES_PER_PASTE = 32; // ~3 KB per paste: the retry unit
+const PASTE_BYTES = LINE_BYTES * LINES_PER_PASTE;
+// Failed steps in a row (without the confirmed size moving forward) before
+// giving up. Counted per position, not per save, so big files aren't more
+// likely to give up.
+const MAX_FAILURES = 5;
+
+// Only ever called on LINE_BYTES-sized slices, so the spread is small.
+const toBase64 = (bytes) => btoa(String.fromCharCode(...bytes));
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
- * Write `code` to /flash/lib/<name>.py (replacing any existing file) and
- * verify the stored size. Returns the path written.
+ * A failed save, with a `code` the UI can localize:
+ * 'transfer' (retries exhausted; details { done, total }), 'verify' (the
+ * hub's copy didn't match), or 'disconnected'. `message` is the technical
+ * detail for the console. The hub's traceback is usually a SyntaxError from a
+ * damaged line, so don't show it to students: they'd think their code is
+ * wrong.
  */
-export async function saveLibrary(board, name, code) {
-  const path = `${LIBRARY_DIR}/${name}.py`;
-  const bytes = new TextEncoder().encode(code);
-  const base64 = toBase64(bytes);
+export class LibrarySaveError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = 'LibrarySaveError';
+    this.code = code;
+    this.details = details;
+  }
+}
 
-  await board.paste(`
+const startTempFile = (tmp) => `
 import os
 try:
     os.mkdir('${LIBRARY_DIR}')
 except OSError:
     pass
-open('${path}', 'wb').close()
-`, { hidden: true });
+open('${tmp}', 'wb').close()
+print(os.stat('${tmp}')[6])
+`;
 
-  for (let i = 0; i < base64.length; i += BASE64_CHUNK) {
-    await board.paste(`
-import binascii
-with open('${path}', 'ab') as f:
-    f.write(binascii.a2b_base64('${base64.slice(i, i + BASE64_CHUNK)}'))
-`, { hidden: true });
+const appendLines = (tmp, bytes) => {
+  const lines = [];
+  for (let i = 0; i < bytes.length; i += LINE_BYTES) {
+    const line = bytes.subarray(i, i + LINE_BYTES);
+    lines.push(`    _w('${toBase64(line)}', ${line.length})`);
   }
-
-  const size = await readPrintJson(board, `
+  return `
 import os
+from binascii import a2b_base64 as _d
+def _w(s, n):
+    b = _d(s)
+    if len(b) != n:
+        raise ValueError('damaged line')
+    _f.write(b)
+with open('${tmp}', 'ab') as _f:
+${lines.join('\n')}
+print(os.stat('${tmp}')[6])
+`;
+};
+
+const probeSize = (tmp) => `
+import os
+try:
+    print(os.stat('${tmp}')[6])
+except OSError:
+    print(-1)
+`;
+
+// Prints the file's SHA-256 as a JSON string, or null if this firmware has no
+// hashlib.sha256 (then only the size check applies).
+const hashFile = (tmp) => `
+import json, binascii
+try:
+    import hashlib
+    _h = hashlib.sha256()
+except (ImportError, AttributeError):
+    _h = None
+if _h is not None:
+    with open('${tmp}', 'rb') as _f:
+        _b = _f.read(512)
+        while _b:
+            _h.update(_b)
+            _b = _f.read(512)
+    print(json.dumps(binascii.hexlify(_h.digest()).decode()))
+else:
+    print('null')
+`;
+
+// LittleFS renames over an existing file; FAT refuses, so fall back to
+// remove + rename there. Safe to run twice: when tmp is already gone (its
+// earlier run worked but the reply was lost), it only reports the size.
+// Without that check a retry would fall into the except branch and delete the
+// library it just committed.
+const commitFile = (tmp, path) => `
+import os
+try:
+    os.stat('${tmp}')
+    _t = True
+except OSError:
+    _t = False
+if _t:
+    try:
+        os.rename('${tmp}', '${path}')
+    except OSError:
+        os.remove('${path}')
+        os.rename('${tmp}', '${path}')
 print(os.stat('${path}')[6])
-`);
-  if (size !== bytes.length) {
-    throw new Error(`Saved ${size} of ${bytes.length} bytes — please try again.`);
+`;
+
+const removeFile = (tmp) => `
+import os
+try:
+    os.remove('${tmp}')
+except OSError:
+    pass
+print(0)
+`;
+
+/**
+ * Write `code` to /flash/lib/<name>.py, replacing any existing file, and
+ * return the path written.
+ *
+ * The code goes to <name>.py.part first, and is checked (size, then SHA-256)
+ * before it's renamed into place. So a failed or cancelled save leaves the
+ * previous library untouched instead of truncated.
+ *
+ * @param {{ onProgress?: (sent: number, total: number) => void, signal?: AbortSignal }} [options]
+ *   `signal` is checked between pastes, so a cancel takes effect within one
+ *   paste (well under a second).
+ */
+export async function saveLibrary(board, name, code, { onProgress, signal } = {}) {
+  const path = `${LIBRARY_DIR}/${name}.py`;
+  const tmp = `${path}.part`;
+  const bytes = new TextEncoder().encode(code);
+  const total = bytes.length;
+  let committing = false;
+  let offset = 0; // bytes confirmed in tmp
+  let failures = 0; // in a row, since offset last moved forward
+
+  const failed = (detail) => {
+    if (!board.connected) throw new LibrarySaveError('disconnected', 'The hub disconnected while saving');
+    console.warn(`[SPIKE] library save step at ${offset}/${total} failed (${detail}); retrying`);
+    if (++failures > MAX_FAILURES) {
+      throw new LibrarySaveError(
+        'transfer',
+        `Gave up after ${MAX_FAILURES} failures in a row at ${offset} of ${total} bytes: ${detail}`,
+        { done: offset, total },
+      );
+    }
+  };
+  // For steps that are safe to run twice (everything except appendLines):
+  // retries a lost or garbled reply.
+  const repeatable = async (pythonCode) => {
+    for (;;) {
+      try {
+        return await readPrintJson(board, pythonCode);
+      } catch (error) {
+        failed(error?.message || String(error));
+      }
+    }
+  };
+
+  try {
+    await repeatable(startTempFile(tmp));
+    onProgress?.(0, total);
+
+    while (offset < total) {
+      signal?.throwIfAborted();
+      const end = Math.min(offset + PASTE_BYTES, total);
+      let reply;
+      let detail;
+      try {
+        reply = await readPrintJson(board, appendLines(tmp, bytes.subarray(offset, end)));
+        detail = `hub reported ${reply} bytes, expected ${end}`;
+      } catch (error) {
+        detail = error?.message || String(error);
+      }
+      if (reply === end) {
+        offset = end;
+        failures = 0;
+        onProgress?.(offset, total);
+        continue;
+      }
+
+      failed(detail);
+      // The paste may have partly (or, if only the reply was lost, fully)
+      // landed. Damaged lines never write, so whatever landed is whole lines
+      // and safe to continue from. (`end` itself needn't be a whole number
+      // of lines from `offset`: the file's last line is usually short.)
+      const landed = await repeatable(probeSize(tmp));
+      const wholeLines = landed === end || (landed - offset) % LINE_BYTES === 0;
+      if (!Number.isInteger(landed) || landed < offset || landed > end || !wholeLines) {
+        // Can't happen given the line-length check; fail rather than guess.
+        throw new LibrarySaveError(
+          'transfer',
+          `Unexpected size ${landed} after a failed paste (${offset}–${end})`,
+          { done: offset, total },
+        );
+      }
+      // Data that landed is progress even if its reply didn't. (offset only
+      // ever grows, so resetting here can't loop forever.)
+      if (landed > offset) failures = 0;
+      offset = landed;
+      onProgress?.(offset, total);
+    }
+
+    signal?.throwIfAborted();
+    const hubHash = await repeatable(hashFile(tmp));
+    if (hubHash !== null && hubHash !== await sha256Hex(bytes)) {
+      throw new LibrarySaveError('verify', `SHA-256 mismatch for ${tmp}`);
+    }
+
+    // Past this point the old library may already be gone, so a failure
+    // keeps tmp rather than deleting the only good copy.
+    committing = true;
+    const size = await repeatable(commitFile(tmp, path));
+    if (size !== total) throw new Error(`Saved ${path}, but the hub reports ${size} of ${total} bytes`);
+    return path;
+  } catch (error) {
+    if (!committing && board.connected) {
+      try {
+        await readPrintJson(board, removeFile(tmp));
+      } catch { /* best effort: a stray .part file is harmless */ }
+    }
+    throw error;
   }
-  return path;
 }

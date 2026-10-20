@@ -21,7 +21,7 @@ import {
   openSpikeBleTransport,
   requestSpikeBleDevice,
 } from '../../utils/spike/bleTransport.js';
-import { listLibraries, saveLibrary } from '../../utils/spike/replLibrary.js';
+import { formatBytes, listLibraries, saveLibrary } from '../../utils/spike/replLibrary.js';
 import { RUN_OUTPUT_LIMIT, SPIKE_RUN, runEndEvent } from '../../utils/spike/runLog.js';
 import { createLegoTerminal } from '../../utils/legoEducation/legoTerminal.js';
 
@@ -64,7 +64,11 @@ function readStoredSlot() {
   }
 }
 
-const formatBytes = (n) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`);
+// Save as Library dialog state. size: bytes of the code tab being saved;
+// progress: 0–100 while saving.
+const LIBRARY_CLOSED = {
+  open: false, existing: null, size: 0, saving: false, progress: 0, cancelling: false, error: '',
+};
 
 /**
  * @param {object} options — read through a ref, so callbacks always see the
@@ -91,7 +95,7 @@ export default function useSpikeHub(options) {
   const [sensorsOpen, setSensorsOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [slot, setSlotState] = useState(readStoredSlot);
-  const [library, setLibrary] = useState({ open: false, existing: null, saving: false, error: '' });
+  const [library, setLibrary] = useState(LIBRARY_CLOSED);
 
   // Mirrors for callbacks that outlive a render (client/BLE/Board events).
   const transportRef = useRef(null);
@@ -112,6 +116,8 @@ export default function useSpikeHub(options) {
   // Set before we close the BLE link ourselves, so the disconnect handler can
   // tell a manual disconnect from a lost connection.
   const bleClosingRef = useRef(false);
+  // AbortController of the library save in progress (null when idle).
+  const librarySaveRef = useRef(null);
 
   const setTransportBoth = (value) => { transportRef.current = value; setTransport(value); };
   const setModeBoth = (value) => { modeRef.current = value; setMode(value); };
@@ -506,7 +512,8 @@ export default function useSpikeHub(options) {
     const board = opt().boardRef.current;
     if (transportRef.current !== 'usb' || modeRef.current !== 'repl' || busyRef.current) return;
     if (!board?.connected || opt().operationInFlightRef.current) return;
-    setLibrary({ open: true, existing: null, saving: false, error: '' });
+    const size = new TextEncoder().encode(opt().getCode() || '').length;
+    setLibrary({ ...LIBRARY_CLOSED, open: true, size });
     opt().operationInFlightRef.current = true;
     try {
       opt().onReplRunReset(); // listing interrupts any running program
@@ -519,28 +526,79 @@ export default function useSpikeHub(options) {
     }
   };
 
+  // LibrarySaveError codes → localized text. The technical message (often a
+  // hub traceback) goes to the browser console only; see LibrarySaveError.
+  const librarySaveErrorText = (error) => {
+    switch (error?.code) {
+      case 'transfer':
+        return t('spikeLibraryTransferFailed')
+          .replace('{done}', formatBytes(error.details.done))
+          .replace('{total}', formatBytes(error.details.total));
+      case 'verify':
+        return t('spikeLibraryVerifyFailed');
+      case 'disconnected':
+        return t('spikeLibraryDisconnected');
+      default:
+        return error?.message || String(error);
+    }
+  };
+
   const saveAsLibrary = async (name) => {
     const board = opt().boardRef.current;
     if (!board?.connected || opt().operationInFlightRef.current) return;
     opt().operationInFlightRef.current = true;
-    setLibrary((state) => ({ ...state, saving: true, error: '' }));
+    const controller = new AbortController();
+    librarySaveRef.current = controller;
+    setLibrary((state) => ({ ...state, saving: true, progress: 0, cancelling: false, error: '' }));
     try {
       const code = opt().getCode() || '';
       await opt().createSnapshot('save_to_library', code);
       // Module names are validated identifiers, safe to embed like slot numbers.
       await opt().logInteraction(`save_to_library_${name}`);
       opt().onReplRunReset();
-      const path = await saveLibrary(board, name, code);
-      setLibrary({ open: false, existing: null, saving: false, error: '' });
-      emitLine(green(t('spikeLibrarySaved').replace('{path}', path).replace('{name}', name)));
+      const path = await saveLibrary(board, name, code, {
+        signal: controller.signal,
+        onProgress: (sent, total) => {
+          const progress = total ? Math.round((sent / total) * 100) : 100;
+          setLibrary((state) => ({ ...state, progress }));
+        },
+      });
+      setLibrary(LIBRARY_CLOSED);
+      emitLine(green(t('spikeLibrarySaved')
+        .replace('{path}', path)
+        .replace('{size}', formatBytes(new TextEncoder().encode(code).length))
+        .replace('{name}', name)));
       await board.write('\r'); // fresh >>> prompt under the message
       atLineStartRef.current = false;
     } catch (error) {
-      void opt().logInteraction('spike_library_save_failed');
-      setLibrary((state) => ({ ...state, saving: false, error: error?.message || String(error) }));
+      if (controller.signal.aborted) {
+        // save_to_library_<name> was logged before the save started, so the
+        // research data needs this outcome to tell it apart from a success.
+        void opt().logInteraction('spike_library_save_cancelled');
+        setLibrary(LIBRARY_CLOSED);
+        emitLine(dim(t('spikeLibraryCancelled')));
+        if (board.connected) {
+          await board.write('\r');
+          atLineStartRef.current = false;
+        }
+      } else {
+        console.error('[SPIKE] Save as Library failed:', error);
+        void opt().logInteraction('spike_library_save_failed');
+        setLibrary((state) => ({
+          ...state, saving: false, cancelling: false, error: librarySaveErrorText(error),
+        }));
+      }
     } finally {
+      librarySaveRef.current = null;
       opt().operationInFlightRef.current = false;
     }
+  };
+
+  // Takes effect between pastes; saveAsLibrary's catch closes the dialog.
+  const cancelLibrarySave = () => {
+    if (!librarySaveRef.current) return;
+    librarySaveRef.current.abort();
+    setLibrary((state) => ({ ...state, cancelling: true }));
   };
 
   const closeLibrary = () => setLibrary((state) => (state.saving ? state : { ...state, open: false }));
@@ -572,6 +630,7 @@ export default function useSpikeHub(options) {
     toggleSensors,
     openLibrary,
     saveAsLibrary,
+    cancelLibrarySave,
     closeLibrary,
     clearTerminal,
   };

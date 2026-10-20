@@ -391,13 +391,15 @@
 }
 
 .spike-library-hint,
+.spike-library-size,
 .spike-library-warning,
 .spike-library-error {
   margin: 0.5rem 0 0 0;
   font-size: 0.85rem;
 }
 
-.spike-library-hint { color: #52606d; }
+.spike-library-hint,
+.spike-library-size { color: #52606d; }
 .spike-library-hint code {
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
@@ -405,6 +407,20 @@
 }
 .spike-library-warning { color: #8a5a00; }
 .spike-library-error { color: #a33a3a; }
+
+.spike-library-progress {
+  height: 6px;
+  margin-top: 1rem;
+  border-radius: 999px;
+  background: #e4e9f0;
+  overflow: hidden;
+}
+
+.spike-library-progress-fill {
+  height: 100%;
+  background: var(--brand-accent, #2563eb);
+  transition: width 0.2s ease;
+}
 
 .spike-library-existing {
   display: flex;

@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { LIBRARY_DIR, toModuleName, validateModuleName } from '../../utils/spike/replLibrary.js';
+import {
+  LARGE_LIBRARY_BYTES,
+  LIBRARY_DIR,
+  formatBytes,
+  toModuleName,
+  validateModuleName,
+} from '../../utils/spike/replLibrary.js';
 import '../ModalBase.css';
 import './Spike.css';
 
 /**
  * "Save as Library": name the current code tab as a module and store it at
- * /flash/lib/<name>.py, importable from any SPIKE program.
+ * /flash/lib/<name>.py, importable from any SPIKE program. While saving it
+ * shows progress (0–100), and Cancel stops the save (onCancelSave) instead of
+ * closing the dialog.
  */
-const SpikeLibraryModal = ({ visible, tabName, existing, saving, error, onSave, onClose }) => {
+const SpikeLibraryModal = ({
+  visible, tabName, existing, size, saving, progress, cancelling, error, onSave, onCancelSave, onClose,
+}) => {
   const { t } = useLanguage();
   const [name, setName] = useState('');
   const inputRef = useRef(null);
@@ -64,6 +74,8 @@ const SpikeLibraryModal = ({ visible, tabName, existing, saving, error, onSave, 
             </p>
           )}
           {replaces && <p className="spike-library-warning">{t('spikeLibraryReplaces').replace('{name}', `${trimmed}.py`)}</p>}
+          <p className="spike-library-size">{t('spikeLibrarySize').replace('{size}', formatBytes(size))}</p>
+          {size > LARGE_LIBRARY_BYTES && <p className="spike-library-warning">{t('spikeLibraryLarge')}</p>}
 
           <div className="spike-library-existing">
             <span>{t('spikeLibraryOnHub')}</span>
@@ -88,12 +100,29 @@ const SpikeLibraryModal = ({ visible, tabName, existing, saving, error, onSave, 
 
           {error && <p className="spike-library-error">{error}</p>}
 
+          {saving && (
+            <div
+              className="spike-library-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+            >
+              <div className="spike-library-progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+          )}
+
           <div className="spike-library-actions">
-            <button type="button" className="spike-library-cancel" onClick={onClose} disabled={saving}>
-              {t('cancel')}
+            <button
+              type="button"
+              className="spike-library-cancel"
+              onClick={saving ? onCancelSave : onClose}
+              disabled={cancelling}
+            >
+              {cancelling ? t('spikeLibraryCancelling') : t('cancel')}
             </button>
             <button type="submit" className="modal-close-button" disabled={!canSave}>
-              {saving ? t('saving') : t('spikeSaveToHub')}
+              {saving ? t('spikeLibrarySavingPct').replace('{pct}', progress) : t('spikeSaveToHub')}
             </button>
           </div>
         </form>
