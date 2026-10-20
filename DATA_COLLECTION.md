@@ -325,8 +325,9 @@ SPIKE connects over **USB** (lands in the MicroPython **REPL**; a toggle switche
 | `spike_repl_command` | Enter pressed (or a multi-line paste) in the terminal — a line typed straight into the REPL. The text itself is in the console captures |
 | `spike_repl_interrupt` | Ctrl-C typed in the terminal |
 | `spike_repl_soft_reset` | Ctrl-D typed in the terminal (soft reset; the app returns the hub to the REPL a second later) |
-| `save_to_library_<name>` | "Save as Library" saved `/flash/lib/<name>.py` (with a `save_to_library` code snapshot) |
-| `spike_library_save_failed` | Save as Library failed |
+| `save_to_library_<name>` | "Save as Library" started saving `/flash/lib/<name>.py` (with a `save_to_library` code snapshot). Logged *before* the transfer, so it counts as a successful save only when it isn't followed by one of the two outcomes below |
+| `spike_library_save_failed` | Save as Library failed (transfer retries exhausted, checksum mismatch, hub disconnected, …). The hub's previous copy of the library is left unchanged |
+| `spike_library_save_cancelled` | The student pressed Cancel while a Save as Library was in progress. The hub's previous copy of the library is left unchanged |
 
 **Slots / Hub OS (USB Slots mode or Bluetooth)**
 
@@ -396,7 +397,7 @@ Centralized here rather than in each UI component (`TitleBar`/`CodeTabs`/`ChatTa
 | `paste_ai_code` | Text pasted into the code editor that appears in an AI chat response; with a `paste_ai_code` snapshot (heuristic — see the note under `code_snapshots`) |
 | `manual_save` | TitleBar "Save Session" clicked |
 
-**Not instrumented, deliberately:** the "Add Code to Chat" / "Add Console to Chat" toggle buttons, the SPIKE slot-selector dropdown, and opening/cancelling the SPIKE "Save as Library" dialog are not logged — the meaningful outcome (which context was actually attached to a *sent* message; which slot or library was actually *saved to*) is already captured elsewhere, and logging every toggle/browse would mostly add noise. Keystrokes in the SPIKE REPL other than Enter / Ctrl-C / Ctrl-D aren't logged (the typed text is in the console captures). The sensor panel hiding itself when leaving Slots mode isn't a `close_hub_sensors`.
+**Not instrumented, deliberately:** the "Add Code to Chat" / "Add Console to Chat" toggle buttons, the SPIKE slot-selector dropdown, and opening/cancelling the SPIKE "Save as Library" dialog before a save starts are not logged (cancelling a save *in progress* is `spike_library_save_cancelled`) — the meaningful outcome (which context was actually attached to a *sent* message; which slot or library was actually *saved to*) is already captured elsewhere, and logging every toggle/browse would mostly add noise. Keystrokes in the SPIKE REPL other than Enter / Ctrl-C / Ctrl-D aren't logged (the typed text is in the console captures). The sensor panel hiding itself when leaving Slots mode isn't a `close_hub_sensors`.
 
 ---
 
