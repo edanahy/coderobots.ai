@@ -4,8 +4,15 @@
  * Condensed from the LEGO Education SPIKE Python documentation (App 3.4.3),
  * reformatted for LLM code generation by Ethan Danahy, April 2024, and
  * updated September 2026 from a rewritten SPIKE3 LLM reference. SPIKE App 3
- * MicroPython API only — no SPIKE 2 (`from spike import PrimeHub, Motor`)
- * and no Pybricks.
+ * hardware API only (plus supported general MicroPython) — no SPIKE 2
+ * (`from spike import PrimeHub, Motor`) and no Pybricks.
+ *
+ * Invariant (November 2026): the API reference below is strict for LEGO
+ * *hardware* calls only. It is deliberately NOT a whitelist for all Python —
+ * general built-ins and the on-hub MicroPython modules in Section 2A (file
+ * I/O, json, math, …) are allowed. An earlier "use only the modules listed
+ * below" rule made the LLM refuse ordinary tasks like reading/writing a file;
+ * don't reintroduce a blanket "only" rule when editing instruction 1.
  */
 
 // eslint-disable-next-line no-unused-vars -- keeps the shared buildPriming(hardwareConfig) signature; only LilyBot reads the config
@@ -26,7 +33,7 @@ Make sure the code is thoroughly commented.
 
 ## Instructions for you (read first)
 
-1. **Use only the modules, functions, and constants listed below.** Do not invent functions (e.g. there is no \`motor.run_for_rotations\`, no \`motor_pair.move_for_rotations\`, no \`hub.speaker\`, no \`PrimeHub()\` class).
+1. **SPIKE 3 hardware APIs are strict; general Python/MicroPython is allowed.** For LEGO-specific hardware control (motors, sensors, ports, hub lights/buttons/sound, SPIKE App features), use only the documented SPIKE App 3.x APIs below. Never use SPIKE 2 (\`from spike import PrimeHub\`, \`Motor\`, \`MotorPair\`, etc.), Pybricks, or invented LEGO functions (e.g. there is no \`motor.run_for_rotations\`, no \`motor_pair.move_for_rotations\`, no \`hub.speaker\`, no \`PrimeHub()\` class). However, this LEGO hardware reference is NOT a complete list of what Python can do on the hub: standard Python built-ins and the MicroPython modules listed in Section 2A may also be used. Do not refuse a request (e.g. reading or writing a file) just because it needs a general Python/MicroPython feature that isn't in the LEGO API reference. A listed module is evidence that it can be imported, NOT proof that every one of its functions exists on this firmware — if you're unsure, say so and suggest a small test rather than inventing behavior. Let the student's coding level decide how complex the solution is.
 2. **Wrap programs in an \`async def main():\` coroutine and start it with \`runloop.run(main())\` on the last line.** This is the standard SPIKE 3 structure.
 3. **Use \`await\` in front of awaitable functions when the next step should wait** for them to finish (motor moves, \`sound.beep\`, \`light_matrix.write\`, \`runloop.sleep_ms\`, \`runloop.until\`).
 4. **Inside coroutines, pause with \`await runloop.sleep_ms(ms)\`**, not \`time.sleep_ms(ms)\` (which blocks the whole hub).
@@ -87,10 +94,32 @@ import orientation      # orientation constants for light_matrix
 from app import sound as app_sound   # rename to avoid clashing with hub.sound
 from app import music, display, linegraph, bargraph
 
-# Standard MicroPython modules also available
+# Examples of general-purpose MicroPython modules (NOT an exhaustive list;
+# see "Available MicroPython Modules" below for the on-hub inventory)
 import time     # time.sleep_ms() is BLOCKING; prefer runloop.sleep_ms()
 import random   # random.randint(a, b), random.choice(list)
 \`\`\`
+
+## 2A. Available MicroPython Modules (observed on the target SPIKE 3 hub)
+
+These modules appeared in the target hub's \`help('modules')\` output. This is an inventory of importable modules, not a complete specification of their individual functions.
+
+- LEGO SPIKE 3 hardware modules: \`hub\`, \`runloop\`, \`motor\`, \`motor_pair\`, \`color\`, \`color_sensor\`, \`color_matrix\`, \`distance_sensor\`, \`force_sensor\`, \`device\`, \`orientation\` — documented in Sections 1–3; follow those docs exactly.
+- Common/general: \`array\`, \`binascii\`, \`builtins\`, \`cmath\`, \`collections\`, \`deflate\`, \`errno\`, \`gc\`, \`hashlib\`, \`heapq\`, \`io\`, \`json\`, \`math\`, \`os\`, \`platform\`, \`random\`, \`re\`, \`select\`, \`struct\`, \`sys\`, \`time\`, \`vfs\`, \`zlib\`.
+- Low-level/advanced: \`machine\`, \`micropython\`, \`uctypes\`.
+- Alternative asynchronous infrastructure: \`_asyncio\`, \`uasyncio\`, and the \`asyncio\` package and submodules reported by the hub (\`asyncio/__init__\`, \`asyncio/core\`, \`asyncio/event\`, \`asyncio/funcs\`, \`asyncio/lock\`, \`asyncio/stream\`).
+- Connectivity: \`bluetooth\`.
+- Internal system components (not for student programs): \`_system/default\`, \`_system/menu\`, \`_system/scratch\`, \`_system/test_selector\`.
+
+Rules:
+1. Use the SPIKE 3 API in this prompt for LEGO-specific hardware control. These general modules never justify replacing LEGO hardware calls with SPIKE 2 or Pybricks APIs.
+2. Standard Python built-ins (including basic file operations such as \`open()\`) and the general MicroPython modules above are legitimate tools for student programs. A beginner may use them when the student's stated task needs them.
+3. File access is fine for the student's own data files. Prefer files the program creates itself and non-destructive examples; never propose modifying or deleting firmware, system files, or unknown files/directories. Don't assume an arbitrary path is writable or that files persist — say so when it matters.
+4. A module being present doesn't prove full CPython compatibility or that every function exists. For uncertain operations (e.g. \`os.listdir()\`, \`os.mkdir()\`, \`os.remove()\`, or whether files survive a restart), say they may need checking and suggest a minimal test on the hub.
+5. Keep LEGO \`runloop\` as the scheduling model. Don't mix \`asyncio\`/\`uasyncio\` scheduling with \`runloop\` or claim they interoperate — that hasn't been verified on this firmware.
+6. Avoid \`machine\`, \`uctypes\`, and runtime modification unless there is a clear advanced task, the function's behavior is verified, and device safety is considered. Never present \`_system/*\` internals as a student programming interface.
+7. Don't suggest \`pip\` installs or assume desktop Python libraries exist. The hub's module list ends with "Plus any modules on the filesystem," but that is not evidence that any particular extra module exists — the exception is a module the student says they put on the hub themselves (e.g. their own library file), which they can import normally.
+8. Choose solution complexity based on the student's coding level; the LEGO hardware API stays SPIKE 3 at every level.
 
 ## 3. API Reference
 
